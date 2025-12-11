@@ -1,0 +1,90 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project Overview
+
+SAE (Sparse Autoencoder) interpretability project for analyzing GPT-2 features extracted from 432K Mexican restaurant Yelp reviews. Uses Modal for serverless GPU compute.
+
+## Build/Test Commands
+
+```bash
+# Run local CPU tests (from src/)
+cd src && pytest
+
+# Run specific test file
+pytest src/tests/test_sae.py -v
+
+# Run Modal GPU tests (requires Modal account)
+modal run src/tests/modal_tests.py
+
+# Run validation tests with real data
+modal run src/tests/modal_tests.py::validate
+```
+
+## Architecture
+
+### Module Structure
+```
+src/
+├── config.py                # Constants: D_MODEL=768, K_ACTIVE=32, N_LATENTS=24576
+├── models/sae.py            # TopKSAE class - sparse autoencoder
+├── processing/
+│   ├── text.py              # Tokenization (64-token windows)
+│   └── activations.py       # GPT-2 layer 8 activation extraction
+├── data/
+│   ├── h5_utils.py          # H5 sparse format queries
+│   └── metadata.py          # Review metadata loading
+└── tests/                   # pytest (local) + modal_tests.py (GPU)
+```
+
+### Data Pipeline
+```
+Text → tokenize_to_windows() → GPT-2 layer 8 → extract_activations() → TopKSAE → sparse features
+```
+
+### Key Constants (src/config.py)
+- `D_MODEL = 768` - GPT-2 hidden dimension
+- `EXPANSION = 32` - SAE expansion factor
+- `K_ACTIVE = 32` - Top-K sparsity (32 active features per token)
+- `N_LATENTS = 24576` - Total features (768 × 32)
+- `HOOK = "blocks.8.hook_resid_pre"` - GPT-2 layer 8 residual stream
+
+### H5 Sparse Format
+The H5 files store activations in sparse format:
+- `z_idx[token]` - Array of 32 active feature indices
+- `z_val[token]` - Array of 32 corresponding activation values
+- `rev_idx[token]` - Review ID for each token position
+
+### TopKSAE Model
+```python
+# Forward pass: input → encode → top-k selection → decode
+x_hat, z = sae(activations)  # z has exactly 32 non-zero entries per token
+```
+
+## Modal Deployment
+
+```bash
+# Upload data to Modal Volume
+modal volume create sae-data
+modal volume put sae-data ./Data/sae_e32_k32_lr0.0003-final.pt /
+modal volume put sae-data ./Data/mexican_national_metadata.npz /
+modal volume put sae-data ./Data/mexican_national_sae_features_e32_k32_lr0_0003-final.h5 /
+
+# Run analysis
+modal run src/modal_app.py
+```
+
+## Notable Features
+
+| Feature | Description |
+|---------|-------------|
+| 16751 | Emphatic expressions ("why in the world") |
+| 20379 | Lexical patterns (gum/gumbo) |
+| 11328 | Formatted lists (bullets, numbered) |
+
+## Reference Documentation
+
+- `src/ARCHITECTURE.md` - Detailed architecture specification
+- `Reference Documents/Code/README.md` - Original notebook documentation
+- `Reference Documents/Claude References/` - Modal, TransformerLens, and data format references
