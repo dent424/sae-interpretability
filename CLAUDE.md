@@ -85,6 +85,35 @@ modal run src/modal_app.py
 
 ## Reference Documentation
 
-- `src/ARCHITECTURE.md` - Detailed architecture specification
-- `Reference Documents/Code/README.md` - Original notebook documentation
-- `Reference Documents/Claude References/` - Modal, TransformerLens, and data format references
+When working on this project, consult these reference files based on your task:
+
+### Architecture & Setup
+| File | When to Use |
+|------|-------------|
+| `src/ARCHITECTURE.md` | Understanding module structure, data flow, class interfaces |
+| `src/MODAL_SETUP.md` | Setting up Modal volumes, deployment configuration |
+
+### Implementation References
+| File | When to Use |
+|------|-------------|
+| `Reference Documents/Claude References/SAE_MODAL_IMPLEMENTATION.md` | Modal app patterns, GPU functions, volume mounting |
+| `Reference Documents/Claude References/MODAL_REFERENCE.md` | Modal API syntax, decorators, Images, Volumes |
+| `Reference Documents/Claude References/TRANSFORMERLENS_REFERENCE.md` | GPT-2 hooks, activation extraction, HookedTransformer API |
+| `Reference Documents/Claude References/NOTEBOOK_CODE_REFERENCE.md` | Original analysis code from Jupyter notebooks |
+
+### Data & Features
+| File | When to Use |
+|------|-------------|
+| `Reference Documents/Claude References/DATA_FORMAT_REFERENCE.md` | H5 sparse format, metadata structure, file schemas |
+| `Reference Documents/Claude References/FEATURE_CATALOG.md` | Known interesting SAE features, interpretations, examples |
+
+### Original Code
+| File | When to Use |
+|------|-------------|
+| `Reference Documents/Code/README.md` | Original notebook documentation, analysis methodology |
+
+### Claude-Specific
+| File | When to Use |
+|------|-------------|
+| `Reference Documents/Claude References/CLAUDE_SDK_REFERENCE.md` | Claude API patterns (if integrating LLM analysis) |
+| `Reference Documents/Claude References/CLAUDE_SKILLS_REFERENCE.md` | Claude Code skills and capabilities |

@@ -11,6 +11,7 @@ import modal
 app = modal.App("sae-tests")
 
 # Container image with all dependencies
+# GPT-2 is downloaded during image build so it's cached for all runs
 image = (
     modal.Image.debian_slim(python_version="3.10")
     .pip_install(
@@ -20,6 +21,9 @@ image = (
         "numpy",
         "pandas",
         "h5py",
+    )
+    .run_commands(
+        "python -c 'from transformer_lens import HookedTransformer; HookedTransformer.from_pretrained(\"gpt2\")'"
     )
 )
 
