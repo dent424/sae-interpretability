@@ -16,11 +16,21 @@ This document specifies how to port the Colab notebook to Modal serverless GPU i
 - Persistent data storage via Modal Volumes
 - Scalable parallel processing
 - Pay-per-second GPU compute
+- **CPU/GPU split for cost efficiency**
 
-**Data files (to be stored on Modal Volume):**
-- `mexican_national_sae_features_e32_k32_lr0_0003-final.h5` (~4GB) - Sparse SAE activations
-- `mexican_national_metadata.npz` - Review texts and metadata
-- `sae_e32_k32_lr0.0003-final.pt` - Trained SAE checkpoint
+**Architecture:**
+| Class | Resource | Purpose |
+|-------|----------|---------|
+| `SAEDataReader` | CPU only | H5 queries, corpus statistics, n-gram analysis |
+| `SAEInterpreter` | GPU (T4) | GPT-2 → SAE inference on new text |
+
+**Key principle:** Only use GPU when running text through the model. All precomputed H5 data queries run on CPU.
+
+**Data files (stored on Modal Volume `sae-data`):**
+- `mexican_national_sae_features_e32_k32_lr0_0003-final.h5` (~9GB) - Sparse SAE activations
+- `mexican_national_metadata.npz` (~220MB) - Review texts and metadata
+- `sae_e32_k32_lr0.0003-final.pt` (~604MB) - Trained SAE checkpoint
+- `review_token_positions.pkl` (~258MB) - Pre-computed review→token position map
 
 ---
 
@@ -29,8 +39,10 @@ This document specifies how to port the Colab notebook to Modal serverless GPU i
 ```
 src/
 ├── ARCHITECTURE.md          # This file
+├── MODAL_SETUP.md           # Modal setup instructions
 ├── __init__.py
 ├── config.py                # Constants and configuration
+├── modal_interpreter.py     # Modal backend service (main entry point)
 ├── models/
 │   ├── __init__.py
 │   └── sae.py              # TopKSAE class
@@ -46,7 +58,9 @@ src/
 │   ├── __init__.py
 │   ├── h5_utils.py         # H5 sparse format utilities
 │   └── metadata.py         # Metadata loading
-└── modal_app.py            # Modal deployment entry point
+├── scripts/
+│   └── precompute_token_positions.py  # Generate review→token position pickle
+└── tests/                   # pytest (local) + modal_tests.py (GPU)
 ```
 
 ---
@@ -77,6 +91,7 @@ VOLUME_MOUNT = "/data"
 H5_PATH = f"{VOLUME_MOUNT}/mexican_national_sae_features_e32_k32_lr0_0003-final.h5"
 METADATA_PATH = f"{VOLUME_MOUNT}/mexican_national_metadata.npz"
 SAE_CHECKPOINT_PATH = f"{VOLUME_MOUNT}/sae_e32_k32_lr0.0003-final.pt"
+TOKEN_POSITIONS_PATH = f"{VOLUME_MOUNT}/review_token_positions.pkl"
 ```
 
 ---
@@ -571,7 +586,48 @@ def main():
 
 ---
 
-## 4. Data Flow
+## 4. API Output Format: Sampling Metadata
+
+**All corpus query methods return dictionaries with `sampling` metadata** to document potential biases.
+
+### Why This Matters
+
+- Corpus has 51M+ tokens - we can't scan everything
+- Different methods use different sampling strategies
+- Results may be biased depending on method
+
+### Example Output
+
+```python
+result = reader.get_feature_stats.remote(feature_idx, sample_size=100000)
+
+# Output:
+{
+  "sampling": {
+    "method": "sequential_from_start",
+    "description": "First N tokens in corpus order (not random)",
+    "tokens_scanned": 100000,
+    "corpus_coverage": 0.0019
+  },
+  "total_activations": 92,
+  "mean_when_active": 0.073,
+  "activation_rate": 0.00092
+}
+```
+
+### Sampling Methods
+
+| Method | Strategy | Bias |
+|--------|----------|------|
+| `sequential_from_start` | First N tokens | Early corpus |
+| `top_by_activation` | Strongest activations | Clearest patterns |
+| `first_n_then_sort` | First N found, sorted | Early + strength |
+
+See `Reference Documents/Claude References/SAE_MODAL_IMPLEMENTATION.md` for full output format documentation.
+
+---
+
+## 5. Data Flow
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -620,7 +676,7 @@ def main():
 
 ---
 
-## 5. Function Mapping
+## 6. Function Mapping
 
 | Notebook Function | New Location | Notes |
 |-------------------|--------------|-------|
@@ -638,34 +694,40 @@ def main():
 
 ---
 
-## 6. Modal Deployment
+## 7. Modal Deployment
 
 ### Setup Volume
 ```bash
-# Upload data files to Modal Volume
+# Create volume and upload data files
 modal volume create sae-data
-modal volume put sae-data /local/path/to/mexican_national_sae_features_e32_k32_lr0_0003-final.h5 /
-modal volume put sae-data /local/path/to/mexican_national_metadata.npz /
-modal volume put sae-data /local/path/to/sae_e32_k32_lr0.0003-final.pt /
+cd Data
+py -3.12 -m modal volume put sae-data mexican_national_sae_features_e32_k32_lr0_0003-final.h5 mexican_national_sae_features_e32_k32_lr0_0003-final.h5
+py -3.12 -m modal volume put sae-data mexican_national_metadata.npz mexican_national_metadata.npz
+py -3.12 -m modal volume put sae-data sae_e32_k32_lr0.0003-final.pt sae_e32_k32_lr0.0003-final.pt
+py -3.12 -m modal volume put sae-data review_token_positions.pkl review_token_positions.pkl
+cd ..
+```
+
+### Generate Token Positions Pickle (if H5 changes)
+```bash
+py -3.12 src/scripts/precompute_token_positions.py
+# Then re-upload to volume
 ```
 
 ### Run
 ```bash
-# From src/ directory
-modal run modal_app.py
-
-# Or specific function
-modal run modal_app.py::SAEAnalyzer.analyze_text --text "Great tacos!" --feature-indices "[16751]"
+# Test the interpreter
+py -3.12 -m modal run src/modal_interpreter.py::test_interpreter
 ```
 
 ### Deploy (persistent endpoint)
 ```bash
-modal deploy modal_app.py
+py -3.12 -m modal deploy src/modal_interpreter.py
 ```
 
 ---
 
-## 7. Implementation Order
+## 8. Implementation Order
 
 1. **config.py** - Constants only, no dependencies
 2. **models/sae.py** - TopKSAE class, depends on config
@@ -679,7 +741,7 @@ modal deploy modal_app.py
 
 ---
 
-## 8. Success Criteria
+## 9. Success Criteria
 
 - [ ] `modal run modal_app.py` executes without errors
 - [ ] `SAEAnalyzer.analyze_text()` returns correct activations for test text

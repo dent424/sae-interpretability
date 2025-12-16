@@ -4,14 +4,15 @@ Reference for the H5 and NPZ data formats used in the SAE interpretability proje
 
 ## Overview
 
-The project uses two data files:
+The project uses three data files:
 
 | File | Format | Contents |
 |------|--------|----------|
 | `mexican_national_sae_features_*.h5` | HDF5 | Sparse SAE activations per token |
 | `mexican_national_metadata.npz` | NumPy | Review texts and metadata |
+| `review_token_positions.pkl` | Pickle | Pre-computed review→token position map |
 
-**Key insight:** H5 contains activations, NPZ contains texts. They link via `review_id`.
+**Key insight:** H5 contains activations, NPZ contains texts, pickle speeds up position lookups. They link via `review_id`.
 
 ---
 
@@ -184,9 +185,26 @@ with h5py.File(H5_PATH, 'r') as f:
     review_text = review_lookup[rev_id]
 ```
 
-### Build Token Position Map
+### Token Position Map (Pre-computed)
 
-Map each review to its token positions in the H5 file:
+The `review_token_positions.pkl` file contains a pre-computed mapping from review_id to global token positions:
+
+```python
+import pickle
+
+# Load pre-computed map (preferred - fast)
+with open('review_token_positions.pkl', 'rb') as f:
+    review_token_positions = pickle.load(f)
+
+# review_token_positions['REVIEW_123'] = [token_pos1, token_pos2, ...]
+```
+
+To regenerate this file (if H5 changes):
+```bash
+py -3.12 src/scripts/precompute_token_positions.py
+```
+
+The script builds the map by iterating through the H5 file:
 
 ```python
 from collections import defaultdict
@@ -205,8 +223,6 @@ with h5py.File(H5_PATH, 'r') as f:
             rev_id_str = rev_id.decode('utf-8') if isinstance(rev_id, bytes) else str(rev_id)
             global_idx = start + local_idx
             review_token_positions[rev_id_str].append(global_idx)
-
-# Now review_token_positions['REVIEW_123'] = [token_pos1, token_pos2, ...]
 ```
 
 ---
@@ -304,7 +320,7 @@ with h5py.File(H5_PATH, 'r') as f:
 ```python
 # Dataset size
 N_REVIEWS = 432_248
-N_TOKENS = ~50_000_000  # Varies
+N_TOKENS = 51_702_947
 
 # SAE configuration
 N_LATENTS = 24_576      # Total features (768 * 32)
@@ -315,6 +331,7 @@ D_MODEL = 768           # GPT-2 hidden dimension
 VOLUME_MOUNT = "/data"
 H5_PATH = f"{VOLUME_MOUNT}/mexican_national_sae_features_e32_k32_lr0_0003-final.h5"
 METADATA_PATH = f"{VOLUME_MOUNT}/mexican_national_metadata.npz"
+TOKEN_POSITIONS_PATH = f"{VOLUME_MOUNT}/review_token_positions.pkl"
 ```
 
 ---
@@ -351,4 +368,104 @@ for start in range(0, total, chunk_size):
 # Sort by value
 sorted_idx = np.argsort(values)[::-1][:k]
 top_positions = [positions[i] for i in sorted_idx]
+```
+
+---
+
+## API Output Format: Sampling Metadata
+
+**All corpus query methods return dictionaries with `sampling` metadata** to document what was actually sampled and potential biases.
+
+### Why Sampling Metadata Matters
+
+- Corpus has 51M+ tokens - we can't scan everything
+- Different methods use different sampling strategies
+- Results may be biased depending on method used
+- You need to know what you're actually measuring
+
+### Sampling Methods
+
+| Method | Strategy | Potential Bias |
+|--------|----------|----------------|
+| `sequential_from_start` | First N tokens in corpus order | Patterns appearing early in corpus |
+| `top_by_activation` | Strongest activations in scanned range | Only clearest/strongest patterns |
+| `first_n_then_sort` | First N found, then sorted by strength | Early corpus + strength bias |
+
+### Standard Sampling Fields
+
+```python
+{
+  "sampling": {
+    "method": "sequential_from_start",           # Sampling strategy used
+    "description": "First N tokens in corpus order (not random)",
+    "tokens_scanned": 100000,                    # How many tokens were examined
+    "corpus_coverage": 0.0019                    # Fraction of total corpus
+  },
+  # ... method-specific data ...
+}
+```
+
+### Per-Method Output Examples
+
+**get_feature_stats:**
+```json
+{
+  "sampling": {"method": "sequential_from_start", "tokens_scanned": 100000, "corpus_coverage": 0.0019},
+  "total_activations": 92,
+  "mean_when_active": 0.073,
+  "max_activation": 0.282,
+  "std_when_active": 0.045,
+  "activation_rate": 0.00092
+}
+```
+
+**get_top_activations:**
+```json
+{
+  "sampling": {
+    "method": "top_by_activation",
+    "description": "Strongest activations within scanned tokens (not full corpus)",
+    "top_k_requested": 10,
+    "n_found": 10,
+    "activations_scanned": 50000,
+    "tokens_scanned": 5000000,
+    "corpus_coverage": 0.0967
+  },
+  "activations": [{"context": "...", "active_token": " my", "activation": 0.229}]
+}
+```
+
+**get_ngram_patterns:**
+```json
+{
+  "sampling": {
+    "method": "top_by_activation",
+    "description": "Top N activations by strength (not random)",
+    "n_requested": 500,
+    "n_found": 487,
+    "tokens_scanned": 5000000,
+    "corpus_coverage": 0.0967,
+    "activation_range": {"min": 0.0312, "max": 0.2297, "mean": 0.0891}
+  },
+  "n_contexts_analyzed": 487,
+  "ngrams": {...}
+}
+```
+
+### Using Sampling Metadata
+
+```python
+result = reader.get_feature_stats.remote(feature_idx, sample_size=100000)
+
+# ALWAYS check what was actually sampled
+print(f"Method: {result['sampling']['method']}")
+print(f"Coverage: {result['sampling']['corpus_coverage']*100:.1f}% of corpus")
+print(f"Tokens scanned: {result['sampling']['tokens_scanned']:,}")
+
+# Interpret results with awareness of sampling bias
+if result['sampling']['corpus_coverage'] < 0.01:
+    print("WARNING: Less than 1% of corpus sampled - results may not be representative")
+
+# Then use the actual data
+print(f"Activation rate: {result['activation_rate']:.6f}")
 ```

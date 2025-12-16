@@ -28,6 +28,7 @@ modal run src/tests/modal_tests.py::validate
 ```
 src/
 ├── config.py                # Constants: D_MODEL=768, K_ACTIVE=32, N_LATENTS=24576
+├── modal_interpreter.py     # Modal backend service for SAE analysis
 ├── models/sae.py            # TopKSAE class - sparse autoencoder
 ├── processing/
 │   ├── text.py              # Tokenization (64-token windows)
@@ -35,6 +36,8 @@ src/
 ├── data/
 │   ├── h5_utils.py          # H5 sparse format queries
 │   └── metadata.py          # Review metadata loading
+├── scripts/
+│   └── precompute_token_positions.py  # Generate review→token position pickle
 └── tests/                   # pytest (local) + modal_tests.py (GPU)
 ```
 
@@ -65,14 +68,23 @@ x_hat, z = sae(activations)  # z has exactly 32 non-zero entries per token
 ## Modal Deployment
 
 ```bash
-# Upload data to Modal Volume
+# Upload data to Modal Volume (from Data/ directory)
 modal volume create sae-data
-modal volume put sae-data ./Data/sae_e32_k32_lr0.0003-final.pt /
-modal volume put sae-data ./Data/mexican_national_metadata.npz /
-modal volume put sae-data ./Data/mexican_national_sae_features_e32_k32_lr0_0003-final.h5 /
+cd Data
+py -3.12 -m modal volume put sae-data sae_e32_k32_lr0.0003-final.pt sae_e32_k32_lr0.0003-final.pt
+py -3.12 -m modal volume put sae-data mexican_national_metadata.npz mexican_national_metadata.npz
+py -3.12 -m modal volume put sae-data mexican_national_sae_features_e32_k32_lr0_0003-final.h5 mexican_national_sae_features_e32_k32_lr0_0003-final.h5
+py -3.12 -m modal volume put sae-data review_token_positions.pkl review_token_positions.pkl
+cd ..
 
-# Run analysis
-modal run src/modal_app.py
+# Run interpreter test
+py -3.12 -m modal run src/modal_interpreter.py::test_interpreter
+```
+
+### Precomputed Data
+The `review_token_positions.pkl` file maps review IDs to their token positions in the H5 file. Regenerate if the H5 changes:
+```bash
+py -3.12 src/scripts/precompute_token_positions.py
 ```
 
 ## Notable Features

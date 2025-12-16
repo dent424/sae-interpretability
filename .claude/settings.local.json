@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(PYTHONUTF8=1 PYTHONIOENCODING=utf-8 py:*)",
+      "Bash(py -3.12 -m modal run:*)"
+    ]
+  }
+}

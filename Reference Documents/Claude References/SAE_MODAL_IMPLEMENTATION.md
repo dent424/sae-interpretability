@@ -1,6 +1,17 @@
 # SAE Interpretability Project - Modal Implementation Guide
 
-Complete reference for converting the SAE interpretability notebook to Modal.
+Complete reference for the SAE interpretability Modal backend.
+
+## Architecture Overview
+
+The implementation uses a **CPU/GPU split** for cost efficiency:
+
+| Class | Resource | Purpose |
+|-------|----------|---------|
+| `SAEDataReader` | CPU only | H5 queries, corpus statistics, n-gram analysis |
+| `SAEInterpreter` | GPU (T4) | GPT-2 → SAE inference on new text |
+
+**Key principle:** Only use GPU when running text through the model. All precomputed H5 data queries run on CPU.
 
 ## Project Configuration
 
@@ -22,13 +33,27 @@ VOLUME_MOUNT = "/data"
 H5_PATH = f"{VOLUME_MOUNT}/mexican_national_sae_features_e32_k32_lr0_0003-final.h5"
 METADATA_PATH = f"{VOLUME_MOUNT}/mexican_national_metadata.npz"
 MODEL_PATH = f"{VOLUME_MOUNT}/sae_e32_k32_lr0.0003-final.pt"
+TOKEN_POSITIONS_PATH = f"{VOLUME_MOUNT}/review_token_positions.pkl"
 ```
 
-## Container Image
+## Container Images
 
 ```python
-image = (
-    modal.Image.debian_slim(python_version="3.10")
+# CPU-only image (lighter, no torch GPU)
+cpu_image = (
+    modal.Image.debian_slim(python_version="3.11")
+    .pip_install(
+        "transformers",
+        "numpy",
+        "h5py",
+        "pandas",
+        "tqdm"
+    )
+)
+
+# GPU image (with torch and transformer-lens)
+gpu_image = (
+    modal.Image.debian_slim(python_version="3.11")
     .pip_install(
         "torch",
         "transformer-lens",
@@ -36,12 +61,11 @@ image = (
         "numpy",
         "h5py",
         "pandas",
-        "matplotlib",
         "tqdm"
     )
 )
 
-data_volume = modal.Volume.from_name("sae-data", create_if_missing=True)
+data_volume = modal.Volume.from_name("sae-data", create_if_missing=False)
 ```
 
 ## Upload Data to Volume
@@ -54,6 +78,116 @@ modal volume put sae-data sae_e32_k32_lr0.0003-final.pt /
 
 # Verify uploads
 modal volume ls sae-data
+```
+
+---
+
+## API Output Format: Sampling Metadata
+
+**IMPORTANT:** All corpus query methods return dictionaries with `sampling` metadata to document potential biases.
+
+### Why Sampling Metadata Matters
+
+- Corpus queries sample from 51M+ tokens - we can't scan everything
+- Different methods have different sampling strategies
+- Results may be biased toward certain patterns depending on method used
+
+### Sampling Methods
+
+| Method | Sampling Strategy | Potential Bias |
+|--------|------------------|----------------|
+| `sequential_from_start` | First N tokens in corpus order | Early corpus patterns |
+| `top_by_activation` | Strongest activations within scanned range | Clearest/strongest patterns only |
+| `first_n_then_sort` | First N found, then sorted by strength | Early corpus + strength bias |
+
+### Example Output Formats
+
+**get_feature_stats:**
+```json
+{
+  "sampling": {
+    "method": "sequential_from_start",
+    "description": "First N tokens in corpus order (not random)",
+    "tokens_scanned": 100000,
+    "corpus_coverage": 0.0019
+  },
+  "total_activations": 92,
+  "mean_when_active": 0.073,
+  "max_activation": 0.282,
+  "std_when_active": 0.045,
+  "activation_rate": 0.00092
+}
+```
+
+**get_top_tokens:**
+```json
+{
+  "sampling": {
+    "method": "sequential_from_start",
+    "description": "First N activations in corpus order (not random)",
+    "activations_collected": 5000,
+    "tokens_scanned": 1000000,
+    "corpus_coverage": 0.0193
+  },
+  "top_tokens": [
+    {"token": " the", "count": 1844, "mean_activation": 0.043},
+    {"token": " my", "count": 1528, "mean_activation": 0.045}
+  ]
+}
+```
+
+**get_top_activations:**
+```json
+{
+  "sampling": {
+    "method": "top_by_activation",
+    "description": "Strongest activations within scanned tokens (not full corpus)",
+    "top_k_requested": 10,
+    "n_found": 10,
+    "activations_scanned": 50000,
+    "tokens_scanned": 5000000,
+    "corpus_coverage": 0.0967
+  },
+  "activations": [
+    {"context": "...", "active_token": " my", "activation": 0.229, ...}
+  ]
+}
+```
+
+**get_ngram_patterns:**
+```json
+{
+  "feature_idx": 16751,
+  "sampling": {
+    "method": "top_by_activation",
+    "description": "Top N activations by strength (not random)",
+    "n_requested": 500,
+    "n_found": 487,
+    "tokens_scanned": 5000000,
+    "corpus_coverage": 0.0967,
+    "activation_range": {
+      "min": 0.0312,
+      "max": 0.2297,
+      "mean": 0.0891
+    }
+  },
+  "n_contexts_analyzed": 487,
+  "ngrams": {...}
+}
+```
+
+### Reading Sampling Metadata in Code
+
+```python
+result = reader.get_feature_stats.remote(feature_idx, sample_size=100000)
+
+# Always check what was actually sampled
+print(f"Method: {result['sampling']['method']}")
+print(f"Coverage: {result['sampling']['corpus_coverage']*100:.1f}% of corpus")
+print(f"Tokens scanned: {result['sampling']['tokens_scanned']:,}")
+
+# Then use the data
+print(f"Activation rate: {result['activation_rate']:.6f}")
 ```
 
 ---
@@ -104,14 +238,96 @@ class TopKSAE(nn.Module):
 
 ---
 
-## Core SAE Interpreter Class
+## CPU-Only Class: SAEDataReader
+
+For querying precomputed H5 data (no GPU needed):
 
 ```python
-@app.cls(image=image, gpu="T4", volumes={VOLUME_MOUNT: data_volume})
+@app.cls(
+    image=cpu_image,
+    volumes={VOLUME_MOUNT: data_volume},
+    scaledown_window=300,  # Keep warm for 5 minutes
+    timeout=600,
+)
+class SAEDataReader:
+    """
+    CPU-only service for reading precomputed SAE activations from H5.
+    Use this for corpus analysis (scanning existing activations).
+    Does NOT load GPT-2 or SAE models - just reads from H5 sparse format.
+    """
+
+    @modal.enter()
+    def setup(self):
+        """Initialize data access on container startup."""
+        from transformers import AutoTokenizer
+        import numpy as np
+        import pandas as pd
+        import h5py
+        import pickle
+
+        print("Loading tokenizer...")
+        self.tok = AutoTokenizer.from_pretrained("gpt2")
+        if self.tok.pad_token is None:
+            self.tok.add_special_tokens({'pad_token': self.tok.eos_token})
+
+        print("Loading metadata...")
+        data = np.load(METADATA_PATH, allow_pickle=True)
+        self.metadata_df = pd.DataFrame({...})
+        self.review_lookup = {...}
+
+        print("Opening H5 file...")
+        self.h5 = h5py.File(H5_PATH, "r")
+        self.total_tokens = self.h5['z_idx'].shape[0]
+
+        print("Loading review token position map...")
+        with open(TOKEN_POSITIONS_PATH, 'rb') as f:
+            self.review_token_positions = pickle.load(f)
+
+        print("Setup complete!")
+
+    @modal.method()
+    def get_feature_stats(self, feature_idx: int, sample_size: int = 500000) -> dict:
+        """Get statistics about a feature's activations."""
+        # Returns dict with 'sampling' metadata
+        ...
+
+    @modal.method()
+    def get_top_tokens(self, feature_idx: int, top_k: int = 20) -> dict:
+        """Get most common tokens that activate a feature."""
+        # Returns dict with 'sampling' metadata
+        ...
+
+    @modal.method()
+    def get_top_activations(self, feature_idx: int, top_k: int = 50) -> dict:
+        """Find globally strongest activations for a feature."""
+        # Returns dict with 'sampling' metadata
+        ...
+
+    @modal.method()
+    def get_ngram_patterns(self, feature_idx: int, top_k_activations: int = 500) -> dict:
+        """Extract common n-grams from contexts where a feature activates."""
+        # Returns dict with 'sampling' metadata
+        ...
+```
+
+---
+
+## GPU Class: SAEInterpreter
+
+For running new text through GPT-2 → SAE pipeline:
+
+```python
+@app.cls(
+    image=gpu_image,
+    gpu="T4",
+    volumes={VOLUME_MOUNT: data_volume},
+    scaledown_window=900,  # Keep warm for 15 minutes
+    timeout=600,
+)
 class SAEInterpreter:
     """
-    Persistent service that loads GPT-2 + SAE once, handles many requests.
-    Use @app.cls for warm containers - avoids reloading models per request.
+    GPU service for running text through GPT-2 → SAE.
+    Use this for analyzing new text (not in H5).
     """
 
     @modal.enter()
@@ -120,8 +336,6 @@ class SAEInterpreter:
         import torch
         from transformer_lens import HookedTransformer
         from transformers import AutoTokenizer
-        import numpy as np
-        import pandas as pd
 
         print("Loading tokenizer...")
         self.tok = AutoTokenizer.from_pretrained("gpt2")
@@ -136,22 +350,7 @@ class SAEInterpreter:
         print("Loading SAE...")
         self.sae = TopKSAE.from_checkpoint(MODEL_PATH, device="cuda")
 
-        print("Loading metadata...")
-        data = np.load(METADATA_PATH, allow_pickle=True)
-        self.metadata_df = pd.DataFrame({
-            'review_id': data['review_ids'],
-            'full_text': data['texts'],
-            'stars': data['stars'],
-            'useful': data['useful'],
-            'user_id': data['user_ids'],
-            'business_id': data['business_ids']
-        })
-        self.review_lookup = {
-            str(row['review_id']): str(row['full_text'])
-            for _, row in self.metadata_df.iterrows()
-        }
-
-        print(f"Loaded {len(self.metadata_df)} reviews")
+        print("Setup complete!")
 
     @modal.method()
     def process_text(self, text: str, feature_indices: list[int] = None):
