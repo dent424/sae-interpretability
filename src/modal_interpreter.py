@@ -465,6 +465,701 @@ class SAEDataReader:
         }
 
     @modal.method()
+    def get_activation_distribution(self, feature_idx: int, sample_size: int = 100000, quiet: bool = False) -> dict:
+        """Get detailed distribution statistics for a feature's activations.
+
+        Computes percentiles, skewness, and kurtosis for non-zero activations.
+        Uses numpy approximations to avoid scipy dependency.
+
+        Args:
+            feature_idx: Feature to analyze
+            sample_size: Number of tokens to scan
+            quiet: Suppress progress bars
+
+        Returns:
+            dict with percentiles (p10, p25, p50, p75, p90, p95, p99),
+            skewness, kurtosis, and sampling metadata
+        """
+        import numpy as np
+        from tqdm import tqdm
+
+        all_activations = []
+        tokens_scanned = 0
+        chunk_size = 100_000
+
+        for start in tqdm(range(0, min(self.total_tokens, sample_size), chunk_size),
+                          desc=f"Distribution for {feature_idx}", disable=quiet):
+            end = min(start + chunk_size, self.total_tokens, sample_size)
+            chunk_acts = self._get_feature_activations_chunk(feature_idx, start, end)
+
+            active_mask = chunk_acts > 0
+            all_activations.extend(chunk_acts[active_mask].tolist())
+            tokens_scanned += len(chunk_acts)
+
+        if not all_activations:
+            return {
+                "sampling": {
+                    "method": "sequential_from_start",
+                    "description": "First N tokens in corpus order",
+                    "tokens_scanned": tokens_scanned,
+                    "n_activations": 0,
+                    "corpus_coverage": round(tokens_scanned / self.total_tokens, 4)
+                },
+                "percentiles": {},
+                "skewness": None,
+                "kurtosis": None
+            }
+
+        acts = np.array(all_activations)
+
+        # Compute percentiles
+        percentile_values = [10, 25, 50, 75, 90, 95, 99]
+        percentiles = {f"p{p}": round(float(np.percentile(acts, p)), 4) for p in percentile_values}
+
+        # Compute skewness: E[(X-μ)³] / σ³
+        mean = np.mean(acts)
+        std = np.std(acts)
+        if std > 0:
+            skewness = float(np.mean(((acts - mean) / std) ** 3))
+            kurtosis = float(np.mean(((acts - mean) / std) ** 4) - 3)  # Excess kurtosis
+        else:
+            skewness = 0.0
+            kurtosis = 0.0
+
+        return {
+            "sampling": {
+                "method": "sequential_from_start",
+                "description": "First N tokens in corpus order",
+                "tokens_scanned": tokens_scanned,
+                "n_activations": len(all_activations),
+                "corpus_coverage": round(tokens_scanned / self.total_tokens, 4)
+            },
+            "percentiles": percentiles,
+            "skewness": round(skewness, 4),
+            "kurtosis": round(kurtosis, 4),
+            "min": round(float(np.min(acts)), 4),
+            "max": round(float(np.max(acts)), 4),
+            "mean": round(float(mean), 4),
+            "std": round(float(std), 4)
+        }
+
+    @modal.method()
+    def get_coactivated_features(self, feature_idx: int, top_k: int = 20, max_samples: int = 10000, quiet: bool = False) -> dict:
+        """Get features that frequently co-activate with the target feature.
+
+        For tokens where target feature fires, collects the other 31 active features
+        and returns frequency-sorted list of co-occurring features.
+
+        Args:
+            feature_idx: Target feature to analyze
+            top_k: Number of top co-activated features to return
+            max_samples: Max number of activations to sample
+            quiet: Suppress progress bars
+
+        Returns:
+            dict with list of co-activated features sorted by frequency
+        """
+        import numpy as np
+        from collections import Counter
+        from tqdm import tqdm
+
+        coactivation_counts = Counter()
+        samples_collected = 0
+        tokens_scanned = 0
+        chunk_size = 100_000
+
+        for start in tqdm(range(0, self.total_tokens, chunk_size),
+                          desc=f"Co-activation for {feature_idx}", disable=quiet):
+            if samples_collected >= max_samples:
+                break
+
+            end = min(start + chunk_size, self.total_tokens)
+            chunk_acts = self._get_feature_activations_chunk(feature_idx, start, end)
+            tokens_scanned += (end - start)
+
+            # Find positions where target feature is active
+            active_indices = np.where(chunk_acts > 0)[0]
+
+            for local_idx in active_indices:
+                if samples_collected >= max_samples:
+                    break
+
+                global_idx = start + local_idx
+
+                # Read the 32 active feature indices for this token
+                z_idx = self.h5['z_idx'][global_idx]
+
+                # Count all features except the target
+                for feat_idx in z_idx:
+                    if feat_idx != feature_idx:
+                        coactivation_counts[int(feat_idx)] += 1
+
+                samples_collected += 1
+
+        # Get top co-activated features
+        top_features = coactivation_counts.most_common(top_k)
+
+        return {
+            "sampling": {
+                "method": "sequential_from_start",
+                "description": "First N activations in corpus order",
+                "activations_sampled": samples_collected,
+                "tokens_scanned": tokens_scanned,
+                "corpus_coverage": round(tokens_scanned / self.total_tokens, 4)
+            },
+            "coactivated_features": [
+                {
+                    "feature_idx": feat_idx,
+                    "count": count,
+                    "percent": round(100.0 * count / samples_collected, 2) if samples_collected > 0 else 0
+                }
+                for feat_idx, count in top_features
+            ]
+        }
+
+    @modal.method()
+    def get_position_distribution(self, feature_idx: int, n_bins: int = 5, max_samples: int = 10000, quiet: bool = False) -> dict:
+        """Get distribution of where in reviews the feature tends to fire.
+
+        Computes relative position (0-1) of each activation within its review
+        and bins into early/middle/late categories.
+
+        Args:
+            feature_idx: Feature to analyze
+            n_bins: Number of position bins (default 5 = 20% each)
+            max_samples: Max activations to sample
+            quiet: Suppress progress bars
+
+        Returns:
+            dict with position bins, mean_position, and std_position
+        """
+        import numpy as np
+        from tqdm import tqdm
+
+        relative_positions = []
+        samples_collected = 0
+        tokens_scanned = 0
+        chunk_size = 100_000
+
+        for start in tqdm(range(0, self.total_tokens, chunk_size),
+                          desc=f"Position distribution for {feature_idx}", disable=quiet):
+            if samples_collected >= max_samples:
+                break
+
+            end = min(start + chunk_size, self.total_tokens)
+            chunk_acts = self._get_feature_activations_chunk(feature_idx, start, end)
+            chunk_rev_ids = self.h5['rev_idx'][start:end]
+            tokens_scanned += (end - start)
+
+            active_indices = np.where(chunk_acts > 0)[0]
+
+            for local_idx in active_indices:
+                if samples_collected >= max_samples:
+                    break
+
+                global_idx = start + local_idx
+                rev_id = chunk_rev_ids[local_idx]
+                rev_id_str = rev_id.decode('utf-8') if isinstance(rev_id, bytes) else str(rev_id)
+
+                # Get all token positions for this review
+                positions = self.review_token_positions.get(rev_id_str, [])
+                if not positions or global_idx not in positions:
+                    continue
+
+                # Find local position within review
+                local_position = positions.index(global_idx)
+                review_length = len(positions)
+
+                # Compute relative position (0 = start, 1 = end)
+                relative_pos = local_position / max(review_length - 1, 1)
+                relative_positions.append(relative_pos)
+                samples_collected += 1
+
+        if not relative_positions:
+            return {
+                "sampling": {
+                    "method": "sequential_from_start",
+                    "description": "First N activations in corpus order",
+                    "activations_sampled": 0,
+                    "tokens_scanned": tokens_scanned,
+                    "corpus_coverage": round(tokens_scanned / self.total_tokens, 4)
+                },
+                "bins": [],
+                "mean_position": None,
+                "std_position": None
+            }
+
+        positions_arr = np.array(relative_positions)
+
+        # Create bins
+        bin_edges = np.linspace(0, 1, n_bins + 1)
+        bin_labels = ["early", "early-mid", "middle", "late-mid", "late"] if n_bins == 5 else [f"bin_{i}" for i in range(n_bins)]
+
+        bins = []
+        for i in range(n_bins):
+            low, high = bin_edges[i], bin_edges[i + 1]
+            if i == n_bins - 1:  # Include right edge for last bin
+                mask = (positions_arr >= low) & (positions_arr <= high)
+            else:
+                mask = (positions_arr >= low) & (positions_arr < high)
+            count = int(np.sum(mask))
+            bins.append({
+                "range": f"{int(low*100)}-{int(high*100)}%",
+                "label": bin_labels[i] if i < len(bin_labels) else f"bin_{i}",
+                "count": count,
+                "percent": round(100.0 * count / len(relative_positions), 2)
+            })
+
+        return {
+            "sampling": {
+                "method": "sequential_from_start",
+                "description": "First N activations in corpus order",
+                "activations_sampled": len(relative_positions),
+                "tokens_scanned": tokens_scanned,
+                "corpus_coverage": round(tokens_scanned / self.total_tokens, 4)
+            },
+            "bins": bins,
+            "mean_position": round(float(np.mean(positions_arr)), 4),
+            "std_position": round(float(np.std(positions_arr)), 4)
+        }
+
+    @modal.method()
+    def get_directional_ngrams(
+        self,
+        feature_idx: int,
+        ngram_sizes: list = None,
+        top_k: int = 15,
+        max_samples: int = 500,
+        max_scan: int = 100000,
+        quiet: bool = False
+    ) -> dict:
+        """Extract n-grams that appear BEFORE vs AFTER the active token.
+
+        Separates left context from right context to identify directional patterns:
+        - left_ngrams: tokens immediately preceding the active token
+        - right_ngrams: tokens immediately following the active token
+
+        This helps identify if a feature fires at specific syntactic boundaries,
+        e.g., "after punctuation" or "before certain words".
+        """
+        from collections import Counter
+        import numpy as np
+
+        if ngram_sizes is None:
+            ngram_sizes = [2, 3]
+
+        # Get top activations with context
+        context_window = max(ngram_sizes) + 1  # Need enough context for largest ngram
+        top_acts_result = self.get_top_activations.local(
+            feature_idx,
+            top_k=max_samples,
+            max_scan=max_scan,
+            context_before=context_window,
+            context_after=context_window,
+            quiet=quiet
+        )
+
+        top_acts = top_acts_result.get("activations", [])
+        source_sampling = top_acts_result.get("sampling", {})
+
+        if not top_acts:
+            empty_ngrams = {}
+            for n in ngram_sizes:
+                empty_ngrams[f"left_{n}grams"] = []
+                empty_ngrams[f"right_{n}grams"] = []
+            return {
+                "sampling": {
+                    "method": "top_by_activation",
+                    "description": "Top N activations by strength",
+                    "n_requested": max_samples,
+                    "n_found": 0,
+                    "tokens_scanned": source_sampling.get("tokens_scanned", max_scan),
+                    "corpus_coverage": source_sampling.get("corpus_coverage", 0)
+                },
+                "n_contexts_analyzed": 0,
+                **empty_ngrams
+            }
+
+        # Initialize counters for left and right ngrams
+        left_counters = {n: Counter() for n in ngram_sizes}
+        right_counters = {n: Counter() for n in ngram_sizes}
+
+        for act_info in top_acts:
+            context = act_info.get("context", "")
+
+            # Find the active token position (marked with **)
+            # The context has format: "tokens **active** more tokens"
+            if "**" not in context:
+                continue
+
+            # Split by the active token marker
+            parts = context.split("**")
+            if len(parts) < 3:
+                continue
+
+            left_text = parts[0]  # Text before active token
+            right_text = parts[2] if len(parts) > 2 else ""  # Text after active token
+
+            # Tokenize left and right contexts
+            if left_text.strip():
+                left_tokens = self.tok(left_text, add_special_tokens=False).input_ids
+                left_token_strings = [t.replace('Ġ', ' ') for t in self.tok.convert_ids_to_tokens(left_tokens)]
+            else:
+                left_token_strings = []
+
+            if right_text.strip():
+                right_tokens = self.tok(right_text, add_special_tokens=False).input_ids
+                right_token_strings = [t.replace('Ġ', ' ') for t in self.tok.convert_ids_to_tokens(right_tokens)]
+            else:
+                right_token_strings = []
+
+            # Extract ngrams from left context (take from the END, closest to active token)
+            for n in ngram_sizes:
+                if len(left_token_strings) >= n:
+                    # Take the last n tokens (immediately before active token)
+                    ngram = tuple(left_token_strings[-n:])
+                    left_counters[n][ngram] += 1
+
+            # Extract ngrams from right context (take from the START, closest to active token)
+            for n in ngram_sizes:
+                if len(right_token_strings) >= n:
+                    # Take the first n tokens (immediately after active token)
+                    ngram = tuple(right_token_strings[:n])
+                    right_counters[n][ngram] += 1
+
+        n_contexts = len(top_acts)
+        result = {
+            "sampling": {
+                "method": "top_by_activation",
+                "description": "Top N activations by strength",
+                "n_requested": max_samples,
+                "n_found": n_contexts,
+                "tokens_scanned": source_sampling.get("tokens_scanned", max_scan),
+                "corpus_coverage": source_sampling.get("corpus_coverage", 0)
+            },
+            "n_contexts_analyzed": n_contexts
+        }
+
+        # Add left ngrams
+        for n in ngram_sizes:
+            top_left = left_counters[n].most_common(top_k)
+            result[f"left_{n}grams"] = [
+                {
+                    "ngram": list(ngram),
+                    "ngram_str": "".join(ngram),
+                    "count": count,
+                    "percent": round(100.0 * count / n_contexts, 1) if n_contexts > 0 else 0
+                }
+                for ngram, count in top_left
+            ]
+
+        # Add right ngrams
+        for n in ngram_sizes:
+            top_right = right_counters[n].most_common(top_k)
+            result[f"right_{n}grams"] = [
+                {
+                    "ngram": list(ngram),
+                    "ngram_str": "".join(ngram),
+                    "count": count,
+                    "percent": round(100.0 * count / n_contexts, 1) if n_contexts > 0 else 0
+                }
+                for ngram, count in top_right
+            ]
+
+        return result
+
+    @modal.method()
+    def get_token_stability(
+        self,
+        feature_idx: int,
+        top_k_tokens: int = 20,
+        max_samples: int = 5000,
+        quiet: bool = False
+    ) -> dict:
+        """Analyze activation variance by token to identify context-dependent features.
+
+        For each unique token where the feature fires, computes:
+        - mean activation across all occurrences
+        - std deviation of activation
+        - coefficient of variation (CV = std / mean)
+
+        High CV indicates the feature is context-dependent (activates differently
+        in different contexts). Low CV indicates stable activation regardless of context.
+        """
+        from collections import defaultdict
+        import numpy as np
+        from tqdm import tqdm
+
+        # Collect activations grouped by token
+        token_activations = defaultdict(list)
+        tokens_scanned = 0
+        activations_sampled = 0
+        chunk_size = 100_000
+
+        for start in tqdm(range(0, self.total_tokens, chunk_size), desc=f"Scanning feature {feature_idx}", disable=quiet):
+            if activations_sampled >= max_samples:
+                break
+
+            end = min(start + chunk_size, self.total_tokens)
+            chunk_acts = self._get_feature_activations_chunk(feature_idx, start, end)
+            chunk_rev_ids = self.h5['rev_idx'][start:end]
+            tokens_scanned += (end - start)
+
+            active_indices = np.where(chunk_acts > 0)[0]
+
+            for local_idx in active_indices:
+                if activations_sampled >= max_samples:
+                    break
+
+                global_idx = start + local_idx
+                activation = float(chunk_acts[local_idx])
+                rev_id = chunk_rev_ids[local_idx]
+                rev_id_str = rev_id.decode('utf-8') if isinstance(rev_id, bytes) else str(rev_id)
+
+                # Get the token at this position
+                review_text = self.review_lookup.get(rev_id_str, "")
+                if not review_text:
+                    continue
+
+                positions = self.review_token_positions.get(rev_id_str, [])
+                if global_idx not in positions:
+                    continue
+                local_position = positions.index(global_idx)
+
+                tokens = self.tok(review_text, add_special_tokens=False).input_ids
+                if local_position >= len(tokens):
+                    continue
+
+                token_id = tokens[local_position]
+                token_str = self.tok.convert_ids_to_tokens([token_id])[0].replace('Ġ', ' ')
+
+                token_activations[token_str].append(activation)
+                activations_sampled += 1
+
+        if not token_activations:
+            return {
+                "sampling": {
+                    "method": "sequential_from_start",
+                    "description": "First N activations in corpus order",
+                    "activations_sampled": 0,
+                    "tokens_scanned": tokens_scanned,
+                    "corpus_coverage": round(tokens_scanned / self.total_tokens, 4)
+                },
+                "tokens": []
+            }
+
+        # Compute statistics for each token
+        token_stats = []
+        for token, acts in token_activations.items():
+            if len(acts) < 2:  # Need at least 2 samples for meaningful stats
+                continue
+
+            acts_arr = np.array(acts)
+            mean_act = float(np.mean(acts_arr))
+            std_act = float(np.std(acts_arr))
+            cv = std_act / mean_act if mean_act > 0 else 0.0
+
+            token_stats.append({
+                "token": token,
+                "mean_act": round(mean_act, 4),
+                "std_act": round(std_act, 4),
+                "n_samples": len(acts),
+                "cv": round(cv, 4)
+            })
+
+        # Sort by frequency (n_samples) descending, take top_k
+        token_stats.sort(key=lambda x: x["n_samples"], reverse=True)
+        token_stats = token_stats[:top_k_tokens]
+
+        return {
+            "sampling": {
+                "method": "sequential_from_start",
+                "description": "First N activations in corpus order",
+                "activations_sampled": activations_sampled,
+                "tokens_scanned": tokens_scanned,
+                "corpus_coverage": round(tokens_scanned / self.total_tokens, 4),
+                "unique_tokens_found": len(token_activations)
+            },
+            "tokens": token_stats
+        }
+
+    @modal.method()
+    def get_top_token_contexts(
+        self,
+        feature_idx: int,
+        top_k_tokens: int = 10,
+        contexts_per_token: int = 2,
+        max_scan: int = 50000,
+        context_size: int = 15,
+        quiet: bool = False
+    ) -> dict:
+        """Get highest-activation contexts for each of the top tokens.
+
+        For each of the top K tokens (by frequency), collects M contexts showing
+        the highest activations. Each context comes from a different review.
+
+        Each context includes feature_activations array showing the target
+        feature's activation at every token position in the context window.
+        """
+        from collections import defaultdict
+        import numpy as np
+        from tqdm import tqdm
+        import heapq
+
+        # First pass: collect all activations grouped by token
+        # Store (activation, global_idx, rev_id) for each token
+        token_candidates = defaultdict(list)
+        tokens_scanned = 0
+        activations_found = 0
+        chunk_size = 100_000
+
+        for start in tqdm(range(0, self.total_tokens, chunk_size), desc=f"Scanning feature {feature_idx}", disable=quiet):
+            if tokens_scanned >= max_scan:
+                break
+
+            end = min(start + chunk_size, self.total_tokens)
+            chunk_acts = self._get_feature_activations_chunk(feature_idx, start, end)
+            chunk_rev_ids = self.h5['rev_idx'][start:end]
+            tokens_scanned += (end - start)
+
+            active_indices = np.where(chunk_acts > 0)[0]
+
+            for local_idx in active_indices:
+                global_idx = start + local_idx
+                activation = float(chunk_acts[local_idx])
+                rev_id = chunk_rev_ids[local_idx]
+                rev_id_str = rev_id.decode('utf-8') if isinstance(rev_id, bytes) else str(rev_id)
+
+                # Get the token at this position
+                review_text = self.review_lookup.get(rev_id_str, "")
+                if not review_text:
+                    continue
+
+                positions = self.review_token_positions.get(rev_id_str, [])
+                if global_idx not in positions:
+                    continue
+                local_position = positions.index(global_idx)
+
+                tokens = self.tok(review_text, add_special_tokens=False).input_ids
+                if local_position >= len(tokens):
+                    continue
+
+                token_id = tokens[local_position]
+                token_str = self.tok.convert_ids_to_tokens([token_id])[0].replace('Ġ', ' ')
+
+                token_candidates[token_str].append((activation, global_idx, rev_id_str, local_position))
+                activations_found += 1
+
+        if not token_candidates:
+            return {
+                "sampling": {
+                    "method": "sequential_from_start",
+                    "description": "First N tokens in corpus order, top activations per token",
+                    "tokens_scanned": tokens_scanned,
+                    "corpus_coverage": round(tokens_scanned / self.total_tokens, 4),
+                    "activations_found": 0
+                },
+                "tokens": []
+            }
+
+        # Get top K tokens by frequency
+        token_counts = [(tok, len(cands)) for tok, cands in token_candidates.items()]
+        token_counts.sort(key=lambda x: x[1], reverse=True)
+        top_tokens = token_counts[:top_k_tokens]
+
+        result_tokens = []
+        for token_str, count in top_tokens:
+            candidates = token_candidates[token_str]
+
+            # Sort by activation strength, then select top from different reviews
+            candidates.sort(key=lambda x: x[0], reverse=True)
+
+            # Collect contexts from different reviews
+            selected_contexts = []
+            seen_reviews = set()
+
+            for activation, global_idx, rev_id_str, local_position in candidates:
+                if rev_id_str in seen_reviews:
+                    continue
+                if len(selected_contexts) >= contexts_per_token:
+                    break
+
+                seen_reviews.add(rev_id_str)
+
+                # Get context
+                review_text = self.review_lookup.get(rev_id_str, "")
+                if not review_text:
+                    continue
+
+                tokens = self.tok(review_text, add_special_tokens=False).input_ids
+                token_strings = self.tok.convert_ids_to_tokens(tokens)
+
+                ctx_start = max(0, local_position - context_size)
+                ctx_end = min(len(token_strings), local_position + context_size + 1)
+                context_tokens = token_strings[ctx_start:ctx_end]
+                active_pos_in_context = local_position - ctx_start
+
+                # Build context string with active token marked
+                context_parts = []
+                for i, t in enumerate(context_tokens):
+                    clean_token = t.replace('Ġ', ' ')
+                    if i == active_pos_in_context:
+                        context_parts.append(f"**{clean_token}**")
+                    else:
+                        context_parts.append(clean_token)
+                context_str = ''.join(context_parts)
+
+                # Get feature activations for each position in context
+                positions = self.review_token_positions.get(rev_id_str, [])
+                feature_activations = []
+
+                for i in range(ctx_start, ctx_end):
+                    if i < len(positions):
+                        h5_idx = positions[i]
+                        # Read z_idx and z_val for this position
+                        z_idx = self.h5['z_idx'][h5_idx]
+                        z_val = self.h5['z_val'][h5_idx]
+                        # Check if target feature is active
+                        if feature_idx in z_idx:
+                            feat_pos = np.where(z_idx == feature_idx)[0][0]
+                            feature_activations.append(round(float(z_val[feat_pos]), 4))
+                        else:
+                            feature_activations.append(0.0)
+                    else:
+                        feature_activations.append(0.0)
+
+                selected_contexts.append({
+                    "context": context_str,
+                    "tokens": [t.replace('Ġ', ' ') for t in context_tokens],
+                    "feature_activations": feature_activations,
+                    "active_token_idx": active_pos_in_context,
+                    "review_id": rev_id_str
+                })
+
+            # Compute mean activation across all occurrences
+            all_acts = [c[0] for c in candidates]
+            mean_activation = float(np.mean(all_acts)) if all_acts else 0.0
+
+            result_tokens.append({
+                "token": token_str,
+                "count": count,
+                "mean_activation": round(mean_activation, 4),
+                "contexts": selected_contexts
+            })
+
+        return {
+            "sampling": {
+                "method": "sequential_from_start",
+                "description": "First N tokens in corpus order, top activations per token",
+                "tokens_scanned": tokens_scanned,
+                "corpus_coverage": round(tokens_scanned / self.total_tokens, 4),
+                "activations_found": activations_found,
+                "unique_tokens_found": len(token_candidates)
+            },
+            "tokens": result_tokens
+        }
+
+    @modal.method()
     def get_feature_stats(self, feature_idx: int, sample_size: int = 500000, quiet: bool = False) -> dict:
         """Get statistics about a feature's activations.
 
@@ -1207,9 +1902,17 @@ def compare_texts(text1: str, text2: str, top_k: int = 10):
 def analyze_feature_json(
     feature_idx: int,
     max_samples: int = 50000,
-    top_k: int = 20,
+    top_k: int = 10,
     output_dir: str = "output",
     include_ngrams: bool = True,
+    include_coactivation: bool = True,
+    include_position: bool = True,
+    include_directional_ngrams: bool = False,
+    include_distribution: bool = True,
+    include_stability: bool = False,
+    include_top_token_contexts: bool = True,
+    contexts_per_token: int = 2,
+    context_chars: int = 50,
     run_ablation: bool = False,
     ablation_top_k: int = 3
 ):
@@ -1219,6 +1922,10 @@ def analyze_feature_json(
     Usage:
         py -3.12 -m modal run src/modal_interpreter.py::analyze_feature_json -- --feature-idx 16751
 
+        # With all analyses enabled:
+        py -3.12 -m modal run src/modal_interpreter.py::analyze_feature_json -- \\
+            --feature-idx 16751 --include-directional-ngrams --include-stability
+
         # With ablation on top 3 activations:
         py -3.12 -m modal run src/modal_interpreter.py::analyze_feature_json -- \\
             --feature-idx 16751 --run-ablation
@@ -1226,14 +1933,58 @@ def analyze_feature_json(
     Args:
         feature_idx: Feature to analyze
         max_samples: Max tokens to scan for statistics
-        top_k: Number of top tokens to return
+        top_k: Number of top tokens to return (default: 10)
         output_dir: Directory for output file
         include_ngrams: Include n-gram pattern analysis (default: True)
+        include_coactivation: Include co-activation matrix (default: True)
+        include_position: Include position distribution analysis (default: True)
+        include_directional_ngrams: Include directional n-grams (default: False - niche)
+        include_distribution: Include activation percentiles/skewness (default: True)
+        include_stability: Include token stability analysis (default: False - niche)
+        include_top_token_contexts: Include top token contexts (default: True)
+        contexts_per_token: Contexts per token in top_token_contexts (default: 2)
+        context_chars: Max chars for context strings (default: 50)
         run_ablation: Run context ablation on top activations (default: False)
         ablation_top_k: Number of top activations to run ablation on
     """
     import json
     import os
+
+    def truncate_context(ctx: str, max_chars: int) -> str:
+        """Truncate context string while preserving active token markers."""
+        if len(ctx) <= max_chars:
+            return ctx
+        # Find the active token position (marked with **)
+        if "**" in ctx:
+            start = ctx.find("**")
+            end = ctx.rfind("**") + 2
+            # Keep the active token centered if possible
+            active_len = end - start
+            remaining = max_chars - active_len
+            if remaining > 0:
+                before = remaining // 2
+                after = remaining - before
+                new_start = max(0, start - before)
+                new_end = min(len(ctx), end + after)
+                return ("..." if new_start > 0 else "") + ctx[new_start:new_end] + ("..." if new_end < len(ctx) else "")
+        # No marker found, simple truncation
+        return ctx[:max_chars] + "..."
+
+    def render_unicode(text: str) -> str:
+        """Convert common unicode escapes to readable labels for human/LLM interpretation.
+
+        GPT-2 tokenizer uses special characters:
+        - Ċ (U+010A) for newline
+        - Ġ (U+0120) for space-prefixed tokens (we leave these alone)
+        - ĉ (U+0109) for tab
+        """
+        if not text:
+            return text
+        # Order matters - check double newline first
+        text = text.replace("\u010a\u010a", "\\n\\n")
+        text = text.replace("\u010a", "\\n")
+        text = text.replace("\u0109", "\\t")
+        return text
 
     # Use CPU-only reader for corpus queries (no GPU needed)
     reader = SAEDataReader()
@@ -1253,18 +2004,118 @@ def analyze_feature_json(
         "top_activations": top_acts_result
     }
 
+    # Render unicode in top_tokens
+    if "top_tokens" in top_tokens_result:
+        for tok in top_tokens_result["top_tokens"]:
+            if "token" in tok:
+                tok["token"] = render_unicode(tok["token"])
+
+    # Truncate contexts and render unicode in top_activations
+    if "activations" in top_acts_result:
+        for act in top_acts_result["activations"]:
+            if "context" in act:
+                act["context"] = render_unicode(truncate_context(act["context"], context_chars))
+            if "active_token" in act:
+                act["active_token"] = render_unicode(act["active_token"])
+
     # N-gram analysis (CPU)
     if include_ngrams:
         print("Running n-gram analysis (top 500 activations)...")
         ngram_result = reader.get_ngram_patterns.remote(
             feature_idx,
             top_k_activations=500,
-            max_scan=max(max_samples, 100000),  # Need enough tokens to find 500 activations
+            max_scan=max(max_samples, 100000),
             quiet=True
         )
+        # Render unicode in ngrams
+        if "ngrams" in ngram_result:
+            for ngram_size, ngram_list in ngram_result["ngrams"].items():
+                for ng in ngram_list:
+                    if "ngram" in ng:
+                        ng["ngram"] = [render_unicode(t) for t in ng["ngram"]]
+                    if "ngram_str" in ng:
+                        ng["ngram_str"] = render_unicode(ng["ngram_str"])
         result["ngram_analysis"] = ngram_result
 
-    # Context ablation on top activations (requires GPU for GPT-2 → SAE)
+    # Co-activation analysis (CPU)
+    if include_coactivation:
+        print("Running co-activation analysis...")
+        coact_result = reader.get_coactivated_features.remote(
+            feature_idx,
+            top_k=20,
+            max_samples=10000,
+            quiet=True
+        )
+        result["coactivation"] = coact_result
+
+    # Position distribution (CPU)
+    if include_position:
+        print("Running position distribution analysis...")
+        pos_result = reader.get_position_distribution.remote(
+            feature_idx,
+            n_bins=5,
+            max_samples=10000,
+            quiet=True
+        )
+        result["position_distribution"] = pos_result
+
+    # Directional n-grams (CPU) - OFF by default
+    if include_directional_ngrams:
+        print("Running directional n-gram analysis...")
+        dir_ngram_result = reader.get_directional_ngrams.remote(
+            feature_idx,
+            ngram_sizes=[2, 3],
+            top_k=15,
+            max_samples=500,
+            quiet=True
+        )
+        result["directional_ngrams"] = dir_ngram_result
+
+    # Activation distribution (CPU)
+    if include_distribution:
+        print("Running activation distribution analysis...")
+        dist_result = reader.get_activation_distribution.remote(
+            feature_idx,
+            sample_size=100000,
+            quiet=True
+        )
+        result["activation_distribution"] = dist_result
+
+    # Token stability (CPU) - OFF by default
+    if include_stability:
+        print("Running token stability analysis...")
+        stab_result = reader.get_token_stability.remote(
+            feature_idx,
+            top_k_tokens=20,
+            max_samples=5000,
+            quiet=True
+        )
+        result["token_stability"] = stab_result
+
+    # Top token contexts (CPU)
+    if include_top_token_contexts:
+        print("Running top token contexts analysis...")
+        ctx_result = reader.get_top_token_contexts.remote(
+            feature_idx,
+            top_k_tokens=top_k,
+            contexts_per_token=contexts_per_token,
+            max_scan=max_samples,
+            context_size=15,
+            quiet=True
+        )
+        # Simplify output: remove detailed contexts arrays (too verbose for interpretation)
+        # Keep only aggregated stats per token (count, mean_activation)
+        if "tokens" in ctx_result:
+            for token_info in ctx_result["tokens"]:
+                # Render unicode in token name
+                if "token" in token_info:
+                    token_info["token"] = render_unicode(token_info["token"])
+                # Remove the verbose contexts array (31-token windows + feature_activations)
+                if "contexts" in token_info:
+                    del token_info["contexts"]
+        result["top_token_contexts"] = ctx_result
+
+    # Context ablation on top activations (requires GPU for GPT-2 -> SAE)
     # Extract the activations list from the result dict
     top_acts_list = top_acts_result.get("activations", []) if isinstance(top_acts_result, dict) else top_acts_result
     if run_ablation and top_acts_list:
@@ -1289,8 +2140,9 @@ def analyze_feature_json(
 
         result["ablation_analysis"] = ablation_results
 
-    # Write to file
+    # Write to file (also create interpretations subdir for downstream use)
     os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(os.path.join(output_dir, "interpretations"), exist_ok=True)
     output_path = os.path.join(output_dir, f"feature_{feature_idx}.json")
     with open(output_path, 'w') as f:
         json.dump(result, f, indent=2)
@@ -1430,10 +2282,15 @@ def batch_test(
 
         token_info = f" @ '{r['active_token']}'" if r['active_token'] else ""
 
-        print(f"[{status}] {act_str}{visual}{token_info}")
-        # Truncate long texts for display
-        display_text = r['text'][:60] + "..." if len(r['text']) > 60 else r['text']
-        print(f"    {display_text}\n")
+        try:
+            print(f"[{status}] {act_str}{visual}{token_info}")
+            # Truncate long texts for display
+            display_text = r['text'][:60] + "..." if len(r['text']) > 60 else r['text']
+            print(f"    {display_text}\n")
+        except UnicodeEncodeError:
+            # Windows console encoding issue - skip visual output
+            print(f"[{status}] {act_str}{token_info}")
+            print(f"    {r['text'][:60]}...\n" if len(r['text']) > 60 else f"    {r['text']}\n")
 
     # Summary
     activated_count = sum(1 for r in results if r['activated'])
@@ -1529,10 +2386,14 @@ def ablate_context(
         # Mark cliff
         cliff_marker = ""
         if result['analysis']['cliff_at_depth'] == depth:
-            cliff_marker = " ← CLIFF"
+            cliff_marker = " <- CLIFF"
 
         status = "+" if activated else "-"
-        print(f"{depth:<6} {left_ctx:<35} [{status}] {act:.3f}   |{bar}|{cliff_marker}")
+        try:
+            print(f"{depth:<6} {left_ctx:<35} [{status}] {act:.3f}   |{bar}|{cliff_marker}")
+        except UnicodeEncodeError:
+            # Windows console encoding issue - no bar
+            print(f"{depth:<6} {left_ctx:<35} [{status}] {act:.3f}{cliff_marker}")
 
     # Analysis summary
     print()

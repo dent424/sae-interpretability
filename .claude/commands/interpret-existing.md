@@ -1,6 +1,6 @@
-# Interpret SAE Feature
+# Interpret SAE Feature (from existing data)
 
-Interpret SAE feature **$ARGUMENTS** using iterative hypothesis testing.
+Interpret SAE feature **$ARGUMENTS** using iterative hypothesis testing, reading from pre-existing analysis data.
 
 ## CRITICAL RESTRICTIONS
 
@@ -10,7 +10,7 @@ Interpret SAE feature **$ARGUMENTS** using iterative hypothesis testing.
 - `Reference Documents/Claude References/NOTEBOOK_CODE_REFERENCE.md`
 - Anything in the `Reference Documents/Code/` directory
 
-**All data must come from the Modal commands below.** Do not explore the codebase or look for alternative data sources.
+**All data must come from the pre-existing analysis file or Modal commands below.** Do not explore the codebase or look for alternative data sources.
 
 ## CAUSAL MASKING REMINDER
 
@@ -25,22 +25,67 @@ Keep this in mind when forming hypotheses and interpreting patterns.
 
 ---
 
+## ACCURACY PROTOCOL
+
+**Tool outputs are ground truth.** When you run a Modal command, the output is real system data.
+
+**Rules:**
+1. **Copy, don't paraphrase** - When reporting numerical values, copy exactly from tool output
+2. **Fresh reads only** - Before writing any value in the report, re-read it from the source (not from memory)
+3. **If uncertain, re-run** - If you're unsure of a value, re-run the command or re-read the file
+
+## Setup
+
+First, create the output folder for this feature:
+```bash
+mkdir -p output/interpretations/feature$ARGUMENTS
+```
+
+## Audit Trail
+
+Create/append to the audit file at:
+```
+output/interpretations/feature$ARGUMENTS/audit.jsonl
+```
+
+**After EVERY step**, append a JSON line with:
+- `step`: Step number (e.g., "1", "2", "3")
+- `name`: Step name
+- `timestamp`: Current time in ISO 8601 format
+- `action`: Type of action (`read_file`, `hypothesis_generation`, `test_design`, `modal_command`, `evaluation`, `synthesis`)
+- `command`: Exact bash command if applicable
+- `decision`: What you decided/concluded
+- `justification`: 1-2 sentences explaining WHY
+- `output_summary`: Key metrics/results from this step
+
+This audit trail is **append-only**. Never delete previous entries.
+
+---
+
 ## Your Task
 
 You are an SAE feature interpretation agent. Follow this loop:
 
-### Step 1: Gather Data + N-gram Analysis
-Run this command to get feature data (now includes automatic n-gram pattern detection):
-```bash
-py -3.12 run_modal_utf8.py analyze_feature_json --feature-idx $ARGUMENTS
-```
-Read the output from `output/feature_$ARGUMENTS.json`
+### Step 1: Load Existing Data
 
-The output now includes:
+Read the pre-computed feature data from:
+```
+feature data/feature_$ARGUMENTS.json
+```
+
+**IMPORTANT:** If this file does not exist, stop and tell the user:
+> "File `feature data/feature_$ARGUMENTS.json` not found. Run `py -3.12 run_modal_utf8.py analyze_feature_json --feature-idx $ARGUMENTS` first, or use `/interpret` instead."
+
+The file contains:
 - **stats**: Activation rate, mean/max values
 - **top_tokens**: Most common tokens where feature fires
 - **top_activations**: Example contexts with strongest activation
 - **ngram_analysis**: Common bigrams, trigrams, 4-grams (helps identify patterns!)
+
+**Audit this step:** Append to `feature$ARGUMENTS/audit.jsonl`:
+```json
+{"step": "1", "name": "Load Existing Data", "timestamp": "<ISO 8601>", "action": "read_file", "input": "feature data/feature_$ARGUMENTS.json", "decision": "<loaded successfully or error>", "justification": "<summary of what the data shows>", "output_summary": {"tokens_scanned": N, "activation_rate": X, "top_trigram": "..."}}
+```
 
 ### Step 2: Generate Hypotheses
 Based on the n-grams and top activations, generate 2-3 hypotheses. The n-gram analysis often reveals the pattern directly. Consider:
@@ -56,12 +101,22 @@ Based on the n-grams and top activations, generate 2-3 hypotheses. The n-gram an
 - Therefore "never in my life" and "never in my dreams" are IDENTICAL patterns from the model's perspective at the firing position
 - Only distinguish patterns by their LEFT context, never by what follows
 
+**Audit this step:** Append to `feature$ARGUMENTS/audit.jsonl`:
+```json
+{"step": "2", "name": "Generate Hypotheses", "timestamp": "<ISO 8601>", "action": "hypothesis_generation", "decision": "Generated N hypotheses", "justification": "<why these hypotheses based on the data>", "output_summary": {"hypotheses": [{"id": 1, "text": "..."}, ...]}}
+```
+
 ### Step 3: Design Test Examples
 For each hypothesis, create:
 - **10 POSITIVE examples** (text that SHOULD activate this feature)
 - **10 NEGATIVE examples** (text that should NOT activate, testing boundaries)
 
 Critical for negatives: Use similar words in DIFFERENT contexts to test if it's semantic vs lexical.
+
+**Audit this step:** Append to `feature$ARGUMENTS/audit.jsonl`:
+```json
+{"step": "3", "name": "Design Test Examples", "timestamp": "<ISO 8601>", "action": "test_design", "decision": "Designed N test cases", "justification": "<rationale for positive/negative selection>", "output_summary": {"positive_count": 10, "negative_count": 10, "positive_examples": ["..."], "negative_examples": ["..."]}}
+```
 
 ### Step 4: Run Batch Tests
 Test ALL examples in a single call:
@@ -83,6 +138,11 @@ Output shows visual activation bars:
     I live in my house...
 ```
 
+**Audit this step:** Append to `feature$ARGUMENTS/audit.jsonl`:
+```json
+{"step": "4", "name": "Run Batch Tests", "timestamp": "<ISO 8601>", "action": "modal_command", "command": "<exact command>", "decision": "<which hypotheses supported/refuted>", "justification": "<interpretation of results>", "output_summary": {"accuracy": X, "tp": N, "tn": N, "fp": N, "fn": N}}
+```
+
 ### Step 4a: Context Ablation (Recommended)
 For a text where the feature fires, run ablation to find the **causally necessary** context:
 ```bash
@@ -102,16 +162,98 @@ Depth  Left Context                   Activation
 Critical token: "never" (removing it drops activation by 58%)
 ```
 
+**Audit this step:** Append to `feature$ARGUMENTS/audit.jsonl`:
+```json
+{"step": "4a", "name": "Context Ablation", "timestamp": "<ISO 8601>", "action": "modal_command", "command": "<exact command>", "decision": "Critical token: <token>", "justification": "<what ablation reveals about causal structure>", "output_summary": {"target_token": "...", "critical_token": "...", "cliff_drop": X, "minimum_context": "..."}}
+```
+
 ### Step 5: Evaluate
 - Which hypotheses are supported by the evidence?
 - Which are falsified?
 - Does the ablation confirm which tokens are causally necessary?
 - Are you confident enough to stop, or should you refine and iterate?
 
+**Audit this step:** Append to `feature$ARGUMENTS/audit.jsonl`:
+```json
+{"step": "5", "name": "Evaluate", "timestamp": "<ISO 8601>", "action": "evaluation", "decision": "<final interpretation>", "justification": "<summary of evidence>", "output_summary": {"confidence": X, "label": "...", "supported_hypotheses": [1], "refuted_hypotheses": [2, 3]}}
+```
+
 ### Step 6: Output
-Write final results to:
-- `output/interpretations/feature_$ARGUMENTS.json` (structured data)
-- `output/interpretations/feature_$ARGUMENTS.md` (human-readable report)
+
+#### Pre-Output Verification
+
+Before writing final outputs, re-read source files and fill in this verification template:
+
+**Re-read `feature data/feature_$ARGUMENTS.json` now.** Copy exact values:
+
+| Field | JSON Path | Value (copy exactly) |
+|-------|-----------|---------------------|
+| Activation rate | stats.activation_rate | _______ |
+| Mean activation | stats.mean_activation | _______ |
+| Max activation | stats.max_activation | _______ |
+| Tokens scanned | stats.tokens_scanned | _______ |
+
+**Re-read `output/batch_test_$ARGUMENTS.json` now.** Verify test results match what you're reporting.
+
+Only proceed to write outputs after completing this verification.
+
+#### Write Outputs
+
+Write final results to (all in `output/interpretations/feature$ARGUMENTS/`):
+- `results.json` (structured data)
+- `report.md` (human-readable report)
+
+**results.json schema:**
+```json
+{
+  "feature_idx": $ARGUMENTS,
+  "status": "complete",
+  "label": "...",
+  "category": "...",
+  "description": "...",
+  "confidence": 0.XX,
+  "corpus_stats": {
+    "tokens_scanned": N,
+    "activation_rate": X,
+    "mean_activation": X,
+    "max_activation": X
+  },
+  "top_tokens": [
+    {"token": "...", "count": N, "mean_activation": X}
+  ],
+  "top_activations": [
+    {"text": "...", "token": "...", "activation": X, "position": N}
+  ],
+  "ngram_analysis": {
+    "bigrams": [{"ngram": "...", "count": N}],
+    "trigrams": [{"ngram": "...", "count": N}],
+    "fourgrams": [{"ngram": "...", "count": N}]
+  },
+  "hypotheses": [
+    {"id": 1, "description": "...", "result": "SUPPORTED|REJECTED|PARTIAL"}
+  ],
+  "test_results": [
+    {"text": "...", "activation": 0.XXX, "token": "...", "expected": true, "actual": true}
+  ],
+  "ablation_results": {
+    "text": "...",
+    "target_token": "...",
+    "critical_token": "...",
+    "minimum_context": "..."
+  },
+  "key_examples": [
+    {"context": "...", "token": "...", "activation": 0.XXX}
+  ],
+  "linguistic_function": "..."
+}
+```
+
+**Audit this step:** Append to `feature$ARGUMENTS/audit.jsonl`:
+```json
+{"step": "6", "name": "Write Output", "timestamp": "<ISO 8601>", "action": "synthesis", "decision": "Final outputs written", "justification": "All phases complete", "output_summary": {"files": ["results.json", "report.md"]}}
+```
+
+---
 
 **IMPORTANT: The markdown report must document EVERYTHING for full transparency.** Use this structure:
 
@@ -139,8 +281,7 @@ Write final results to:
 
 ## Step 1: Initial Data Gathering
 
-**Command:**
-[exact command used]
+**Source:** `output/feature_$ARGUMENTS.json` (pre-existing)
 
 ### Corpus Statistics
 [Table with tokens scanned, activation rate, mean, max]
@@ -263,14 +404,23 @@ py -3.12 run_modal_utf8.py analyze_feature_json --feature-idx $ARGUMENTS --run-a
 
 ## Collect Intermediate Files
 
-After writing outputs, move working files into the interpretations folder:
+After writing outputs, move working files into the feature folder:
 
 ```bash
-mv output/batch_test_$ARGUMENTS.json output/interpretations/ 2>/dev/null || true
-mv output/ablation_$ARGUMENTS_*.json output/interpretations/ 2>/dev/null || true
+mv output/batch_test_$ARGUMENTS.json output/interpretations/feature$ARGUMENTS/ 2>/dev/null || true
+mv output/ablation_$ARGUMENTS_*.json output/interpretations/feature$ARGUMENTS/ 2>/dev/null || true
 ```
 
 This preserves raw test results for auditing while keeping the main `output/` folder clean.
+
+## Final Outputs
+
+All outputs are in `output/interpretations/feature$ARGUMENTS/`:
+- `audit.jsonl` - Step-by-step audit trail (append-only)
+- `results.json` - Structured data
+- `report.md` - Human-readable report
+- `batch_test_$ARGUMENTS.json` - Raw batch test results (intermediate)
+- `ablation_$ARGUMENTS_*.json` - Raw ablation results (intermediate)
 
 ## Begin
 Start with Step 1 now.

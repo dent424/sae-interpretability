@@ -95,6 +95,58 @@ py -3.12 src/scripts/precompute_token_positions.py
 | 20379 | Lexical patterns (gum/gumbo) |
 | 11328 | Formatted lists (bullets, numbered) |
 
+## Pre-computed Feature Data
+
+The `feature data/` folder contains pre-generated analysis data for ~940 features:
+
+### Contents
+- **`feature_<ID>.json`** - Pre-computed feature analysis files (stats, top tokens, top activations, n-gram analysis)
+- **`Feature_output.csv`** - Directory/index of features with columns:
+  - `feature_index` - The feature ID
+  - `rank_control` - Ranking with control metric
+  - `rank_nocontrol` - Ranking without control metric
+  - `interpretation` - Human-provided interpretation (if available)
+
+### Usage
+The `-existing` slash commands read from this folder:
+```
+/interpret-existing 16751        → reads feature data/feature_16751.json
+/interpret-and-challenge-existing 16751  → reads feature data/feature_16751.json
+```
+
+## Feature Interpretation Workflow
+
+Use slash commands to interpret SAE features with structured hypothesis testing.
+
+**Important:** These features come from GPT-2's causally-masked residual stream. At each token position, the model only sees previous tokens (left context). Feature activations cannot depend on what comes *after* the token where they fire.
+
+### Slash Commands
+
+| Command | Description |
+|---------|-------------|
+| `/interpret <feature_id>` | Full analysis: gather data from Modal, generate hypotheses, test, interpret |
+| `/interpret-existing <feature_id>` | Same workflow but reads from `feature data/feature_<id>.json` |
+| `/interpret-and-challenge <feature_id>` | Full analysis + adversarial challenge phase |
+| `/interpret-and-challenge-existing <feature_id>` | Challenge workflow from `feature data/feature_<id>.json` |
+| `/interpret-parallel <id1>, <id2>, ...` | Run multiple interpretations in parallel |
+| `/interpret-parallel-existing <id1>, <id2>, ...` | Parallel from `feature data/` files |
+
+### Output Structure
+
+Each interpretation produces 3 files in `output/interpretations/feature<ID>/`:
+- `audit.jsonl` - Step-by-step audit trail (append-only)
+- `results.json` - Structured interpretation data
+- `report.md` - Human-readable report
+
+### Generating New Feature Data
+
+To generate analysis data for a feature not in `feature data/`:
+```bash
+py -3.12 run_modal_utf8.py analyze_feature_json --feature-idx <FEATURE_ID>
+```
+
+Output: `output/feature_<ID>.json` (move to `feature data/` for use with `-existing` commands)
+
 ## Reference Documentation
 
 When working on this project, consult these reference files based on your task:
@@ -129,3 +181,59 @@ When working on this project, consult these reference files based on your task:
 |------|-------------|
 | `Reference Documents/Claude References/CLAUDE_SDK_REFERENCE.md` | Claude API patterns (if integrating LLM analysis) |
 | `Reference Documents/Claude References/CLAUDE_SKILLS_REFERENCE.md` | Claude Code skills and capabilities |
+
+## Permissions Policy
+
+**IMPORTANT:** Before modifying `.claude/settings.local.json`, you MUST state the benefits and risks of the proposed change and get user approval.
+
+### Current Allowed Permissions
+
+The project uses minimal, scoped permissions:
+- `Bash(py -3.12 run_modal_utf8.py:*)` - Modal wrapper only (safe: uses list-based subprocess)
+- `Bash(mkdir output:*)` - Directory creation under output/ only
+- `Write/Edit(output/**)` - File operations under output/ only
+
+### Before Adding Any Permission
+
+**State clearly:**
+
+1. **What you want to add:** The exact permission string
+2. **Why it's needed:** What operation requires this permission
+3. **Benefit:** What becomes possible/easier
+4. **Risk:** What could go wrong (be specific about attack vectors)
+5. **Scope:** Is it minimal? Could it be narrower?
+
+### Risk Levels by Permission Type
+
+| Pattern | Risk | Why |
+|---------|------|-----|
+| `Bash(specific_script.py:*)` | LOW | If script uses list-based subprocess |
+| `Bash(mkdir path:*)` | MEDIUM | Command chaining possible via `&` or `&&` |
+| `Bash(python:*)` or `Bash(py:*)` | CRITICAL | Arbitrary code execution |
+| `Bash(cat:*)` | HIGH | Can read any file (credentials, keys) |
+| `Bash(echo:*)` | HIGH | Can write files via redirection |
+| `Write(scoped/path/**)` | LOW | Properly scoped |
+| `Write(**)` | CRITICAL | Can overwrite any file |
+
+### Never Add Without Explicit User Request
+
+- `Bash(python:*)` or `Bash(py -3.12:*)` - arbitrary Python execution
+- `Bash(cat:*)` - read any file
+- `Bash(rm:*)` - delete files
+- `Bash(curl:*)` or `Bash(wget:*)` - network access
+- Any permission with `**` paths outside `output/`
+
+### Example: Proper Permission Request
+
+```
+I need to add a permission to run pytest.
+
+**Permission:** `Bash(pytest:*)`
+**Why:** To run test suite after code changes
+**Benefit:** Automated test verification
+**Risk:** MEDIUM - pytest could execute arbitrary Python in test files;
+         command chaining possible via shell operators
+**Scope:** Could narrow to `Bash(pytest src/tests:*)` to limit to test directory
+
+Do you want me to add this permission?
+```
