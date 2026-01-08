@@ -1484,7 +1484,8 @@ class SAEInterpreter:
             "tokens": [t.replace('Ġ', ' ') for t in tokens],
             "n_tokens": len(tokens),
             "top_features_per_token": top_features_per_token,
-            "feature_activations": feature_activations
+            "feature_activations": feature_activations,
+            "z_np": z_np  # Full SAE activations (all 32 features per token)
         }
 
     @modal.method()
@@ -1502,7 +1503,10 @@ class SAEInterpreter:
                 top_features_per_token: For each token, list of (feature_idx, activation)
                 feature_activations: Full activation matrix as nested list
         """
-        return self._process_text_internal(text)
+        result = self._process_text_internal(text)
+        # Remove z_np before returning - it's a numpy array that can't be serialized
+        result.pop("z_np", None)
+        return result
 
     @modal.method()
     def test_feature_examples(
@@ -1528,23 +1532,26 @@ class SAEInterpreter:
             # Process text through GPT-2 → SAE (using internal method)
             result = self._process_text_internal(text)
 
-            # Check if feature fires
-            feature_key = str(feature_idx)
-            activations = result.get("feature_activations", {}).get(feature_key, [])
+            # Get full SAE activations for the specific feature (not truncated top-10)
+            z_np = result.get("z_np")
+            tokens = result.get("tokens", [])
 
             # Find max activation and which token
             max_activation = 0.0
             active_token = None
             active_token_idx = None
 
-            if activations:
-                for idx, act_val in enumerate(activations):
+            if z_np is not None and len(tokens) > 0:
+                # Get activations for this specific feature across all tokens
+                feature_activations = z_np[:len(tokens), feature_idx]
+
+                for idx, act_val in enumerate(feature_activations):
                     if act_val > max_activation:
-                        max_activation = act_val
+                        max_activation = float(act_val)
                         active_token_idx = idx
 
-                if active_token_idx is not None and active_token_idx < len(result.get("tokens", [])):
-                    active_token = result["tokens"][active_token_idx]
+                if active_token_idx is not None and active_token_idx < len(tokens):
+                    active_token = tokens[active_token_idx]
 
             results.append({
                 "text": text,
@@ -1552,7 +1559,7 @@ class SAEInterpreter:
                 "max_activation": float(max_activation),
                 "active_token": active_token,
                 "active_token_idx": active_token_idx,
-                "all_tokens": result.get("tokens", [])
+                "all_tokens": tokens
             })
 
         return results
