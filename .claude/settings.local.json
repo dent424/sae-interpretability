@@ -14,7 +14,8 @@
       "Bash(mv output/ablation_:*)",
       "Bash(mkdir:*)",
       "Bash(dir:*)",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "Bash(py -3.12 batch_utils.py:*)"
     ]
   }
 }

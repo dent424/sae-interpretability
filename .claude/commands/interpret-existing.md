@@ -18,6 +18,10 @@ Interpret SAE feature **$ARGUMENTS** using iterative hypothesis testing, reading
 
 **All data must come from the pre-existing analysis file or Modal commands below.** Do not explore the codebase or look for alternative data sources.
 
+## PATH REQUIREMENT
+
+Use relative paths for all commands. Working directory is the project root.
+
 ## CAUSAL MASKING REMINDER
 
 These features come from GPT-2's **causally-masked residual stream**. At token position N, the model only has access to tokens 0 through N-1 (the left context). It cannot see tokens at position N+1 or beyond.
@@ -44,7 +48,7 @@ Keep this in mind when forming hypotheses and interpreting patterns.
 
 First, create the output folder for this feature:
 ```bash
-mkdir -p output/interpretations/feature$ARGUMENTS
+py -3.12 batch_utils.py ensure-output-dir --feature $ARGUMENTS
 ```
 
 ## Audit Trail

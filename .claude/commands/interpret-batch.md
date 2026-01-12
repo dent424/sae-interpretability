@@ -28,45 +28,46 @@ Display: "Will process {total} features, {batch_size} at a time, sorted by {sort
 
 ### Step 2: Create CSV Backup
 
-Create a backup of the CSV file:
-1. Read `feature data/Feature_output.csv` using the Read tool
-2. Write the contents to `feature data/Feature_output.csv.backup` using the Write tool
-
-**Do NOT use Bash copy/cp commands** - use the Read → Write pattern instead.
+Run:
+```bash
+py -3.12 batch_utils.py backup-csv
+```
 
 Display: "Created backup: Feature_output.csv.backup"
 
-### Step 3: Find Next Features
+### Step 3: Find Candidate Features
 
-1. Read `feature data/Feature_output.csv`
-2. Parse as CSV with columns: `feature_index`, `rank_control`, `rank_nocontrol`, `interpretation`
-3. Filter rows where `interpretation` column is empty
-4. Sort by `{sort_by}` ascending (use the column specified in Step 1)
-5. Take first `total` rows
-6. Extract the `feature_index` values into a list
-7. Display: "Candidate features: 8134, 9404, 23933, ..."
+Run:
+```bash
+py -3.12 batch_utils.py find-uninterpreted --sort-by {sort_by} --limit {total}
+```
 
-### Step 4: Verify Pre-computed Data Exists
+Parse the JSON output to extract the `features` array. This gives you the list of feature IDs with empty interpretations, sorted by the specified column.
 
-For each feature_index in the list, check that `feature data/feature_{ID}.json` exists (NOTE: underscore before ID).
-- **If any are missing:** Report which files are missing and stop. User must generate them first with:
+Display: "Candidate features: {features list}"
+
+### Step 4: Verify Pre-computed Data and Filter Existing
+
+Run:
+```bash
+py -3.12 batch_utils.py check-existing --features {comma-separated feature IDs}
+```
+
+Parse the JSON output:
+- **If `missing_precomputed` is non-empty:** Report which files are missing and stop. User must generate them first with:
   ```bash
   py -3.12 run_modal_utf8.py analyze_feature_json --feature-idx <ID>
   ```
-- Only proceed when ALL features have pre-computed data.
+- **If `has_output` is non-empty:** These features already have interpretations. Remove them from processing list.
+  Display: "Skipping N features with existing output: X, Y, Z"
 
-### Step 5: Filter Out Already-Interpreted Features
+The features to process are those in `missing_output` that are also in `has_precomputed`.
 
-For each feature_index in the list:
-1. Check if `output/interpretations/feature{ID}/results.json` exists (NOTE: no underscore in output folder)
-2. If it exists: Remove from processing list (already has interpretation)
-
-Display: "Skipping N features with existing output: X, Y, Z"
 Display: "Features to process: A, B, C, ..."
 
 If no features remain to process, display "All features already have interpretations" and exit.
 
-### Step 6: Process in Batches (LOOP)
+### Step 5: Process in Batches (LOOP)
 
 Split the remaining feature list into chunks of size `batch_size`.
 
@@ -89,22 +90,26 @@ Split the remaining feature list into chunks of size `batch_size`.
 3. Wait for all agents in this batch to complete
 
 4. **Extract interpretations for this batch:**
-   - For each feature, read `output/interpretations/feature{ID}/results.json`
-   - Extract `label`, `verdict`, and `executive_summary` fields
-   - Format as: "{label} [{verdict}]: {executive_summary}"
-   - **Truncate to 250 characters** if longer, adding "..." at end
-   - **If results.json is missing or malformed:** Write "FAILED" as interpretation, log error, continue with others
+   For each feature in this batch, run:
+   ```bash
+   py -3.12 batch_utils.py extract-interpretation --feature {ID}
+   ```
 
-5. **Update CSV immediately after each batch:**
-   - Read `feature data/Feature_output.csv`
-   - Update `interpretation` column for each feature in this batch
-   - Use standard CSV escaping (wrap in quotes, double internal quotes)
-   - Write back to CSV
-   - Display: "Batch {i} complete. Updated CSV with {n} interpretations."
+   Parse the JSON output:
+   - If `status` is "success": use the `interpretation` field
+   - If `status` is "error": use "FAILED" as the interpretation
+
+5. **Update CSV for each feature:**
+   For each feature with a successful or failed interpretation, run:
+   ```bash
+   py -3.12 batch_utils.py update-csv --feature {ID} --interpretation "{interpretation text}"
+   ```
+
+   Display: "Batch {i} complete. Updated CSV with {n} interpretations."
 
 6. Continue to next batch
 
-### Step 7: Final Summary
+### Step 6: Final Summary
 
 After all batches complete, display:
 
@@ -124,9 +129,23 @@ Feature_output.csv has been updated.
 
 ## Error Handling
 
-- **Missing results.json:** Write "FAILED" in CSV, continue with other features
-- **Malformed JSON:** Write "FAILED" in CSV, log error, continue
+- **Missing results.json:** `extract-interpretation` returns error status, write "FAILED" in CSV
+- **Malformed JSON:** `extract-interpretation` returns error status, write "FAILED" in CSV
 - **Agent crash:** Partial batch results are still extracted, failed features get "FAILED"
+
+## Utility Script Reference
+
+The `batch_utils.py` script provides these commands:
+
+| Command | Purpose |
+|---------|---------|
+| `backup-csv` | Create Feature_output.csv.backup |
+| `find-uninterpreted --sort-by X --limit N` | Find features with empty interpretations |
+| `check-existing --features 1,2,3` | Check for output files and pre-computed data |
+| `extract-interpretation --feature N` | Pull label/verdict/summary from results.json |
+| `update-csv --feature N --interpretation "..."` | Write interpretation back to CSV |
+
+All commands output JSON for easy parsing.
 
 ## Example Run
 
@@ -134,13 +153,22 @@ User runs: `/interpret-batch 3 7`
 
 ```
 Will process 7 features, 3 at a time, sorted by rank_nocontrol
+
+> py -3.12 batch_utils.py backup-csv
 Created backup: Feature_output.csv.backup
+
+> py -3.12 batch_utils.py find-uninterpreted --sort-by rank_nocontrol --limit 7
 Candidate features: 8134, 9404, 23933, 21422, 483, 13333, 17588
+
+> py -3.12 batch_utils.py check-existing --features 8134,9404,23933,21422,483,13333,17588
 Skipping 0 features with existing output
 Features to process: 8134, 9404, 23933, 21422, 483, 13333, 17588
 
 --- Batch 1/3: Processing features 8134, 9404, 23933 ---
 [3 agents run in parallel]
+> py -3.12 batch_utils.py extract-interpretation --feature 8134
+> py -3.12 batch_utils.py update-csv --feature 8134 --interpretation "..."
+[repeat for each feature]
 Batch 1 complete. Updated CSV with 3 interpretations.
 
 --- Batch 2/3: Processing features 21422, 483, 13333 ---
