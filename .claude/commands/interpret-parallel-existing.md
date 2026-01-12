@@ -13,14 +13,19 @@ py -3.12 run_modal_utf8.py analyze_feature_json --feature-idx <FEATURE_ID>
 
 1. Parse the feature indices from `$ARGUMENTS` (comma or space separated, e.g., "16751, 11328, 20379")
 
-2. Read the full prompt from `.claude/commands/interpret-and-challenge-existing.md`
-
-3. For EACH feature index, spawn a sub-agent using the Task tool:
+2. For EACH feature index, spawn a sub-agent using the Task tool:
    - `subagent_type: "general-purpose"`
-   - Replace `$ARGUMENTS` in the interpret-and-challenge-existing prompt with the specific feature index
+   - Use this prompt template (replace {ID} with the feature index):
+     ```
+     Interpret SAE feature {ID}.
+
+     1. Read the full instructions from: .claude/commands/interpret-and-challenge-existing.md
+     2. Follow ALL steps in that file for feature {ID} (replace $ARGUMENTS with {ID})
+     3. Produce outputs in: output/interpretations/feature{ID}/
+     ```
    - Each agent works completely independently
 
-4. **CRITICAL:** Spawn ALL agents in a SINGLE message with multiple Task tool calls. This is what makes them run in parallel.
+3. **CRITICAL:** Spawn ALL agents in a SINGLE message with multiple Task tool calls. This is what makes them run in parallel.
 
 ## Example
 

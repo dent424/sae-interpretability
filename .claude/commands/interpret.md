@@ -2,6 +2,12 @@
 
 Interpret SAE feature **$ARGUMENTS** using iterative hypothesis testing.
 
+## Pre-flight Check
+
+**First**, check if `output/interpretations/feature_$ARGUMENTS.json` or `feature_$ARGUMENTS.md` exists. If so, ask the user: "Feature $ARGUMENTS has existing analysis. Continue/Resume, Start Fresh, or Abort?"
+
+---
+
 ## CRITICAL RESTRICTIONS
 
 **DO NOT read, access, or reference these files under any circumstances:**
@@ -82,6 +88,11 @@ Output shows visual activation bars:
 [-] 0.000 |░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░|            <- NOT activated
     I live in my house...
 ```
+
+**SAFEGUARD:** If ALL activations are 0.0:
+1. Try a corpus context from `top_activations` (e.g., reconstruct "...I'm happy** to** say..." as full text)
+2. If corpus context also fails → **STOP.** Flag: "Feature [N] won't activate. Check feature index or pipeline."
+3. If corpus works but synthetic fails → redesign test examples based on corpus patterns
 
 ### Step 4a: Context Ablation (Recommended)
 For a text where the feature fires, run ablation to find the **causally necessary** context:

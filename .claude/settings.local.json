@@ -3,14 +3,18 @@
     "allow": [
       "Bash(py -3.12 run_modal_utf8.py:*)",
       "Bash(mkdir output:*)",
-      "Bash(mkdir \"output:*)",
       "Bash(mkdir -p output:*)",
-      "Bash(mkdir -p:*output/interpretations*)",
       "Write(C:\\Users\\alexa\\Box\\EVERYTHING2\\39 - Bottom Up Coding with LLMs\\Claude Code Folder\\output\\**)",
       "Edit(C:\\Users\\alexa\\Box\\EVERYTHING2\\39 - Bottom Up Coding with LLMs\\Claude Code Folder\\output\\**)",
       "Read(feature data/**)",
-      "Bash(py -3.12 \"C:\\\\Users\\\\alexa\\\\Box\\\\EVERYTHING2\\\\39 - Bottom Up Coding with LLMs\\\\Claude Code Folder\\\\run_modal_utf8.py\" batch_test --feature-idx 8134 --texts \"Triple newline test.\n\n\n\nAfter three.|Quadruple newlines.\n\n\n\n\nAfter four.|Tab before newline.\t\n\nNext line.|Space space newline.  \n\nNext.|Start with blank line.\n\nText after.|Very short.\n\nX.|1\n\n2\")",
-      "Bash(py -3.12:*)"
+      "Edit(feature data/Feature_output.csv)",
+      "Write(feature data/Feature_output.csv.backup)",
+      "Skill(interpret-batch)",
+      "Bash(mv output/batch_test_:*)",
+      "Bash(mv output/ablation_:*)",
+      "Bash(mkdir:*)",
+      "Bash(dir:*)",
+      "Bash(wc:*)"
     ]
   }
 }

@@ -2,6 +2,12 @@
 
 Challenge and stress-test the interpretation for feature **$ARGUMENTS**.
 
+## Pre-flight Check
+
+**First**, check if `output/interpretations/feature_$ARGUMENTS.json` contains `challenge_results` or `challenge_phase`. If so, ask the user: "Feature $ARGUMENTS already has challenge results. Re-challenge or Abort?"
+
+---
+
 ## Your Task
 
 You are a **devil's advocate** for SAE feature interpretations. Your job is to **break** the current hypothesis, not confirm it. A good interpretation should survive adversarial testing.
@@ -62,6 +68,11 @@ Batch all tests in a single call:
 ```bash
 py -3.12 run_modal_utf8.py batch_test --feature-idx $ARGUMENTS --texts "counterexample1|counterexample2|...|grid_test1|grid_test2|..."
 ```
+
+**SAFEGUARD:** If ALL activations are 0.0:
+1. Try a corpus context from `top_activations` (e.g., reconstruct "...I'm happy** to** say..." as full text)
+2. If corpus context also fails → **STOP.** Flag: "Feature [N] won't activate. Check feature index or pipeline."
+3. If corpus works but synthetic fails → redesign test examples based on corpus patterns
 
 ## Step 4: Analyze Results
 

@@ -2,6 +2,12 @@
 
 Interpret SAE feature **$ARGUMENTS** using iterative hypothesis testing, reading from pre-existing analysis data.
 
+## Pre-flight Check
+
+**First**, check if `output/interpretations/feature$ARGUMENTS/` exists with `results.json` or `report.md`. If so, ask the user: "Feature $ARGUMENTS has existing analysis. Continue/Resume, Start Fresh, or Abort?"
+
+---
+
 ## CRITICAL RESTRICTIONS
 
 **DO NOT read, access, or reference these files under any circumstances:**
@@ -142,6 +148,11 @@ Output shows visual activation bars:
 ```json
 {"step": "4", "name": "Run Batch Tests", "timestamp": "<ISO 8601>", "action": "modal_command", "command": "<exact command>", "decision": "<which hypotheses supported/refuted>", "justification": "<interpretation of results>", "output_summary": {"accuracy": X, "tp": N, "tn": N, "fp": N, "fn": N}}
 ```
+
+**SAFEGUARD:** If ALL activations are 0.0:
+1. Try a corpus context from `top_activations` (e.g., reconstruct "...I'm happy** to** say..." as full text)
+2. If corpus context also fails → **STOP.** Flag: "Feature [N] won't activate. Check feature index or pipeline."
+3. If corpus works but synthetic fails → redesign test examples based on corpus patterns
 
 ### Step 4a: Context Ablation (Recommended)
 For a text where the feature fires, run ablation to find the **causally necessary** context:
@@ -402,16 +413,21 @@ For deep analysis, run with automatic ablation on top activations:
 py -3.12 run_modal_utf8.py analyze_feature_json --feature-idx $ARGUMENTS --run-ablation
 ```
 
-## Collect Intermediate Files
+## Collect Intermediate Files (REQUIRED)
 
-After writing outputs, move working files into the feature folder:
+**Run these commands** to move working files into the feature folder:
 
 ```bash
 mv output/batch_test_$ARGUMENTS.json output/interpretations/feature$ARGUMENTS/ 2>/dev/null || true
 mv output/ablation_$ARGUMENTS_*.json output/interpretations/feature$ARGUMENTS/ 2>/dev/null || true
 ```
 
-This preserves raw test results for auditing while keeping the main `output/` folder clean.
+This keeps the feature folder self-contained with all analysis artifacts.
+
+**Audit this step:** Append to `feature$ARGUMENTS/audit.jsonl`:
+```json
+{"step": "7", "name": "Collect Intermediate Files", "timestamp": "<ISO 8601>", "action": "file_move", "command": "mv output/batch_test_$ARGUMENTS.json and ablation files", "decision": "Commands executed", "justification": "Moving intermediate files to feature folder", "output_summary": {"files_moved": ["batch_test_$ARGUMENTS.json", "ablation files if present"], "verified": true}}
+```
 
 ## Final Outputs
 

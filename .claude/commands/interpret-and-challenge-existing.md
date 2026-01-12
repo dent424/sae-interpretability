@@ -2,6 +2,12 @@
 
 Run full interpretation pipeline for feature **$ARGUMENTS**: first interpret, then challenge. Uses pre-existing analysis data.
 
+## Pre-flight Check
+
+**First**, check if `output/interpretations/feature$ARGUMENTS/` exists with `results.json` or `report.md`. If so, ask the user: "Feature $ARGUMENTS has existing analysis. Continue/Resume, Start Fresh, or Abort?"
+
+---
+
 ## CRITICAL RESTRICTIONS
 
 **DO NOT read, access, or reference these files under any circumstances:**
@@ -171,6 +177,11 @@ py -3.12 run_modal_utf8.py batch_test --feature-idx $ARGUMENTS --texts "positive
 ```json
 {"step": "1.3", "name": "Design and Run Batch Tests", "timestamp": "<ISO 8601>", "action": "modal_command", "command": "<exact batch_test command>", "decision": "<which hypotheses supported/refuted>", "justification": "<interpretation of test results>", "output_summary": {"accuracy": X, "tp": N, "tn": N, "fp": N, "fn": N}}
 ```
+
+**SAFEGUARD:** If ALL activations are 0.0:
+1. Try a corpus context from `top_activations` (e.g., reconstruct "...I'm happy** to** say..." as full text)
+2. If corpus context also fails → **STOP.** Flag: "Feature [N] won't activate. Check feature index or pipeline."
+3. If corpus works but synthetic fails → redesign test examples based on corpus patterns
 
 ### Step 1.4: Context Ablation
 
@@ -600,16 +611,21 @@ Write the final report to `output/interpretations/feature$ARGUMENTS/report.md` w
 {"step": "3.2", "name": "Write Report", "timestamp": "<ISO 8601>", "action": "synthesis", "decision": "Final report written", "justification": "Synthesized all evidence", "output_summary": {"file": "report.md"}}
 ```
 
-### Step 3.3: Collect Intermediate Files
+### Step 3.3: Collect Intermediate Files (REQUIRED)
 
-Move working files into the feature folder to keep everything self-contained:
+**Run these commands** to move working files into the feature folder:
 
 ```bash
 mv output/batch_test_$ARGUMENTS.json output/interpretations/feature$ARGUMENTS/ 2>/dev/null || true
 mv output/ablation_$ARGUMENTS_*.json output/interpretations/feature$ARGUMENTS/ 2>/dev/null || true
 ```
 
-This preserves raw test results for auditing while keeping the main `output/` folder clean.
+This keeps the feature folder self-contained with all analysis artifacts.
+
+**Audit this step:** Append to `feature$ARGUMENTS/audit.jsonl`:
+```json
+{"step": "3.3", "name": "Collect Intermediate Files", "timestamp": "<ISO 8601>", "action": "file_move", "command": "mv output/batch_test_$ARGUMENTS.json and ablation files", "decision": "Commands executed", "justification": "Moving intermediate files to feature folder", "output_summary": {"files_moved": ["batch_test_$ARGUMENTS.json", "ablation files if present"], "verified": true}}
+```
 
 ---
 

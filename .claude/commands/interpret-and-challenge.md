@@ -2,6 +2,12 @@
 
 Run full interpretation pipeline for feature **$ARGUMENTS**: first interpret, then challenge.
 
+## Pre-flight Check
+
+**First**, check if `output/interpretations/feature$ARGUMENTS/` exists with output files. If so, ask the user: "Feature $ARGUMENTS has existing analysis. Continue/Resume, Start Fresh, or Abort?"
+
+---
+
 ## CRITICAL RESTRICTIONS
 
 **DO NOT read, access, or reference these files under any circumstances:**
@@ -27,9 +33,9 @@ Keep this in mind when forming hypotheses and interpreting patterns.
 
 ## Setup
 
-First, ensure the output directory exists:
+First, create the output folder for this feature:
 ```bash
-mkdir -p output/interpretations
+mkdir -p output/interpretations/feature$ARGUMENTS
 ```
 
 ---
@@ -44,7 +50,7 @@ Run this command to get feature data:
 ```bash
 py -3.12 run_modal_utf8.py analyze_feature_json --feature-idx $ARGUMENTS
 ```
-Read the output from `output/feature_$ARGUMENTS.json`
+Read the output from `output/feature$ARGUMENTS.json`
 
 The output includes:
 - **stats**: Activation rate, mean/max values
@@ -53,7 +59,7 @@ The output includes:
 - **ngram_analysis**: Common bigrams, trigrams, 4-grams (helps identify patterns!)
 
 **After this step, initialize the JSON file:**
-Write to `output/interpretations/feature_$ARGUMENTS.json`:
+Write to `output/interpretations/feature$ARGUMENTS/results.json`:
 ```json
 {
   "feature_idx": $ARGUMENTS,
@@ -126,6 +132,11 @@ py -3.12 run_modal_utf8.py batch_test --feature-idx $ARGUMENTS --texts "positive
   }
 }
 ```
+
+**SAFEGUARD:** If ALL activations are 0.0:
+1. Try a corpus context from `top_activations` (e.g., reconstruct "...I'm happy** to** say..." as full text)
+2. If corpus context also fails → **STOP.** Flag: "Feature [N] won't activate. Check feature index or pipeline."
+3. If corpus works but synthetic fails → redesign test examples based on corpus patterns
 
 ### Step 1.4: Context Ablation
 
@@ -290,7 +301,7 @@ Now synthesize everything into final outputs.
 
 ### Step 3.1: Finalize JSON
 
-Update `output/interpretations/feature_$ARGUMENTS.json` with final fields:
+Update `output/interpretations/feature$ARGUMENTS/results.json` with final fields:
 ```json
 {
   "feature_idx": $ARGUMENTS,
@@ -321,7 +332,7 @@ Update `output/interpretations/feature_$ARGUMENTS.json` with final fields:
 
 ### Step 3.2: Write Markdown Report
 
-Write the final report to `output/interpretations/feature_$ARGUMENTS.md` with this structure:
+Write the final report to `output/interpretations/feature$ARGUMENTS/report.md` with this structure:
 
 ```markdown
 # Feature [N] Interpretation Report
@@ -482,17 +493,17 @@ Write the final report to `output/interpretations/feature_$ARGUMENTS.md` with th
 Move working files into the feature folder to keep everything self-contained:
 
 ```bash
-mv output/batch_test_$ARGUMENTS.json output/interpretations/feature_$ARGUMENTS/ 2>/dev/null || true
-mv output/ablation_$ARGUMENTS_*.json output/interpretations/feature_$ARGUMENTS/ 2>/dev/null || true
+mv output/batch_test_$ARGUMENTS.json output/interpretations/feature$ARGUMENTS/ 2>/dev/null || true
+mv output/ablation_$ARGUMENTS_*.json output/interpretations/feature$ARGUMENTS/ 2>/dev/null || true
 ```
 
 ---
 
 ## Final Outputs
 
-All outputs are in `output/interpretations/feature_$ARGUMENTS/`:
-- `feature_$ARGUMENTS.json` - Structured data
-- `feature_$ARGUMENTS.md` - Human-readable report
+All outputs are in `output/interpretations/feature$ARGUMENTS/`:
+- `feature$ARGUMENTS.json` - Structured data
+- `feature$ARGUMENTS.md` - Human-readable report
 - `batch_test_$ARGUMENTS.json` - Raw batch test results (intermediate)
 - `ablation_$ARGUMENTS_*.json` - Raw ablation results (intermediate)
 

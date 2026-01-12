@@ -237,3 +237,28 @@ I need to add a permission to run pytest.
 
 Do you want me to add this permission?
 ```
+
+## Tool Strategy (Permission-Aware Patterns)
+
+When performing file operations, prefer Claude Code's native tools over Bash commands:
+
+| Instead of... | Use... | Why |
+|---------------|--------|-----|
+| `copy file1 file2` | Read file1 → Write file2 | Bash copy not permitted |
+| `cp file1 file2` | Read file1 → Write file2 | Bash cp not permitted |
+| `cat file` | Read tool | Native tool, always works |
+| `echo "x" > file` | Write tool | Native tool, always works |
+| `grep pattern` | Grep tool | Native tool, more features |
+| `find / ls` for patterns | Glob tool | Native tool, faster |
+| `python script.py` | Only via scoped wrappers | Arbitrary Python not permitted |
+
+**For Modal commands:** Always use the approved wrapper:
+```bash
+py -3.12 run_modal_utf8.py <command> --args
+```
+
+**For file copying:** Read the source file, then Write to destination:
+```
+1. Read("source/file.txt")
+2. Write("destination/file.txt", <contents from step 1>)
+```
