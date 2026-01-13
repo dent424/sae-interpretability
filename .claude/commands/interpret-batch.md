@@ -84,6 +84,8 @@ Split the remaining feature list into chunks of size `batch_size`.
      1. Read the full instructions from: .claude/commands/interpret-and-challenge-existing.md
      2. Follow ALL steps in that file for feature {ID} (replace $ARGUMENTS with {ID})
      3. Produce outputs in: output/interpretations/feature{ID}/
+
+     IMPORTANT: Use relative paths only (e.g., "output/interpretations/feature{ID}/"). Absolute paths will trigger permission prompts.
      ```
    - **CRITICAL:** Spawn ALL agents for this batch in a SINGLE message (parallel execution)
 

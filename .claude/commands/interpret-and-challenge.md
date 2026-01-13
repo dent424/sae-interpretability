@@ -22,17 +22,6 @@ Run full interpretation pipeline for feature **$ARGUMENTS**: first interpret, th
 
 Use relative paths for all commands. Working directory is the project root.
 
-## CAUSAL MASKING REMINDER
-
-These features come from GPT-2's **causally-masked residual stream**. At token position N, the model only has access to tokens 0 through N-1 (the left context). It cannot see tokens at position N+1 or beyond.
-
-**For interpretation, this means:**
-- Feature activations depend only on **left context** - what comes before the token
-- The model cannot "know" what follows when the feature fires
-- Example: " my" in "never in my life" vs "never in my dreams" - at the " my" position, the model sees identical context
-
-Keep this in mind when forming hypotheses and interpreting patterns.
-
 ---
 
 ## Setup
@@ -89,6 +78,8 @@ Based on the n-grams and top activations, generate 2-3 hypotheses. Consider:
 - It CANNOT see anything to the RIGHT of X
 - Example: If feature fires on " my" in "never in my life", it cannot see "life"
 - Only distinguish patterns by their LEFT context, never by what follows
+
+**ALL hypotheses must account for causal masking.** Nothing that comes after an active token can matter for that activation. (Exception: if the feature fires on multiple tokens in sequence, later active tokens may provide information about the pattern.)
 
 **After this step, update the JSON:**
 ```json
