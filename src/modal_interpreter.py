@@ -2209,7 +2209,8 @@ def batch_test(
     texts: str = "",
     texts_file: str = "",
     output_dir: str = "output",
-    show_visual: bool = True
+    show_visual: bool = True,
+    fresh: bool = False
 ):
     """
     Batch test multiple texts for a specific feature - single Modal call.
@@ -2235,9 +2236,11 @@ def batch_test(
         texts_file: Path to JSON file with list of texts
         output_dir: Directory for output file
         show_visual: Show visual activation bars in console
+        fresh: If True, overwrite existing results. If False (default), append to existing.
 
     Output:
-        Writes batch_test_<feature_idx>.json with results for each text
+        Writes/appends to batch_test_<feature_idx>.json with results for each text.
+        Results accumulate across multiple calls unless --fresh is specified.
     """
     import json
     import os
@@ -2305,21 +2308,50 @@ def batch_test(
     print(f"Summary: {activated_count}/{len(results)} texts activated feature {feature_idx}")
     print(f"{'='*70}\n")
 
-    # Write JSON output
+    # Write JSON output (append to existing if present)
+    import time
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, f"batch_test_{feature_idx}.json")
 
+    # Add timestamp to each result
+    batch_timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    for r in results:
+        r["batch_timestamp"] = batch_timestamp
+
+    # Read existing results if file exists and not fresh
+    existing_results = []
+    existing_batches = 0
+    if not fresh and os.path.exists(output_path):
+        try:
+            with open(output_path, 'r') as f:
+                existing_data = json.load(f)
+                if isinstance(existing_data.get("results"), list):
+                    existing_results = existing_data["results"]
+                    existing_batches = existing_data.get("n_batches", 1)
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"Warning: Could not read existing {output_path}: {e}")
+            print("Starting fresh.")
+
+    # Combine results
+    all_results = existing_results + results
+
     output_data = {
         "feature_idx": feature_idx,
-        "n_texts": len(text_list),
-        "n_activated": activated_count,
-        "results": results
+        "n_texts": len(all_results),
+        "n_activated": sum(1 for r in all_results if r.get("activated")),
+        "n_batches": existing_batches + 1,
+        "last_updated": batch_timestamp,
+        "results": all_results
     }
 
     with open(output_path, 'w') as f:
         json.dump(output_data, f, indent=2)
 
-    print(f"Results written to: {output_path}")
+    if existing_results:
+        print(f"Results appended to: {output_path}")
+        print(f"  (Total: {len(all_results)} tests across {output_data['n_batches']} batches)")
+    else:
+        print(f"Results written to: {output_path}")
 
 
 @app.local_entrypoint()

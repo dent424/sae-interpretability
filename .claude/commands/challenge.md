@@ -4,7 +4,7 @@ Challenge and stress-test the interpretation for feature **$ARGUMENTS**.
 
 ## Pre-flight Check
 
-**First**, check if `output/interpretations/feature_$ARGUMENTS.json` contains `challenge_results` or `challenge_phase`. If so, ask the user: "Feature $ARGUMENTS already has challenge results. Re-challenge or Abort?"
+**First**, check if `output/interpretations/feature$ARGUMENTS/results.json` contains `challenge_results` or `challenge_phase`. If so, ask the user: "Feature $ARGUMENTS already has challenge results. Re-challenge or Abort?"
 
 ---
 
@@ -15,8 +15,8 @@ You are a **devil's advocate** for SAE feature interpretations. Your job is to *
 ## Step 1: Load Current Interpretation
 
 Read the existing interpretation:
-- `output/interpretations/feature_$ARGUMENTS.json` (structured data)
-- `output/interpretations/feature_$ARGUMENTS.md` (full report)
+- `output/interpretations/feature$ARGUMENTS/results.json` (structured data)
+- `output/interpretations/feature$ARGUMENTS/report.md` (full report)
 
 Extract:
 1. **The hypothesis**: What pattern does the interpretation claim?
@@ -30,43 +30,26 @@ If no interpretation exists, stop and tell the user to run `/interpret $ARGUMENT
 Design tests specifically intended to **FALSIFY** the hypothesis. Think like a skeptic.
 
 ### 2a: Counterexample Hunt (5-8 tests)
-Create texts that **fit the stated pattern but you suspect WON'T fire**:
-- Edge cases the original tests missed
-- Unusual contexts for the same syntactic structure
-- Domain transfers (if pattern is "Save your money", try "Save your game")
-- Archaic/formal/slang variants
+Texts that **fit pattern but you suspect WON'T fire**: edge cases, unusual contexts, domain transfers, archaic/formal/slang variants.
 
 ### 2b: Alternative Explanation Tests (5-8 tests)
-What ELSE could explain the activations? Test for:
-- **Tokenization artifacts**: Does activation depend on how GPT-2 tokenizes, not meaning?
-- **Position effects**: Same phrase at sentence start vs middle vs end
-- **Frequency confounds**: Is it just detecting common words in common positions?
-- **Spurious correlation**: What if it's actually detecting something NEARBY the claimed pattern?
+Test for confounds: tokenization artifacts, position effects, frequency confounds, spurious correlations (detecting something NEARBY).
 
 ### 2c: Minimal Pair Grid (9-16 tests)
-Systematically vary ONE element at a time. Create a grid like:
-
-If hypothesis is "Imperative + your":
+Vary ONE element at a time. Example grid for "Imperative + your":
 | | "your" | "my" | "the" | "our" |
 |---|---|---|---|---|
-| "Save" | test | test | test | test |
-| "Keep" | test | test | test | test |
-| "Take" | test | test | test | test |
-| "Get" | test | test | test | test |
+| "Save/Keep/Take/Get" | test | test | test | test |
+Isolates whether BOTH elements are necessary.
 
-This isolates whether BOTH elements are necessary or just one.
-
-### 2d: Surprising Prediction (2-3 tests)
-If the hypothesis is TRUE, what **unexpected** text SHOULD activate?
-- Something the original tester probably didn't think of
-- Something that sounds weird but fits the pattern
-- Test it. If it fires, that's strong evidence FOR the hypothesis.
+### 2d: Surprising Predictions (2-3 tests)
+If hypothesis TRUE, what unexpected text SHOULD activate? Strong evidence if it fires.
 
 ## Step 3: Run All Challenge Tests
 
-Batch all tests in a single call:
+Batch all tests in a single call (appends to existing batch_test file):
 ```bash
-py -3.12 run_modal_utf8.py batch_test --feature-idx $ARGUMENTS --texts "counterexample1|counterexample2|...|grid_test1|grid_test2|..."
+py -3.12 run_modal_utf8.py batch_test --feature-idx $ARGUMENTS --output-dir output/interpretations/feature$ARGUMENTS --texts "counterexample1|counterexample2|...|grid_test1|grid_test2|..."
 ```
 
 **SAFEGUARD:** If ALL activations are 0.0:
@@ -97,37 +80,46 @@ For each test category, evaluate:
 
 ## Step 5: Verdict
 
-Assign one of these outcomes:
-
-### CONFIRMED
-- Counterexamples failed to break it
-- Alternative explanations ruled out
-- Minimal pairs show the claimed pattern
-- Surprising predictions worked
-→ **Increase confidence** to 90%+
-
-### REFINED
-- Core hypothesis holds but needs adjustment
-- Discovered boundary conditions
-- Found additional sub-patterns
-→ **Update the interpretation** with refinements
-
-### REFUTED
-- Found systematic counterexamples
-- Alternative explanation fits better
-- Minimal pairs contradict the claim
-→ **Rewrite the interpretation** with new hypothesis
-
-### UNCERTAIN
-- Mixed results, no clear pattern
-- Need more data or different approach
-→ **Flag for human review**
+Assign one of:
+- **CONFIRMED:** Counterexamples failed, alternatives ruled out, minimal pairs confirm, surprising predictions worked → Increase confidence to 90%+
+- **REFINED:** Core holds but needs adjustment, discovered boundary conditions → Update interpretation
+- **REFUTED:** Systematic counterexamples, better alternative explanation, minimal pairs contradict → Rewrite with new hypothesis
+- **UNCERTAIN:** Mixed results, need more data → Flag for human review
 
 ## Step 6: Update Interpretation
 
 Based on verdict, update:
-- `output/interpretations/feature_$ARGUMENTS.json` - add `challenge_results` section
-- `output/interpretations/feature_$ARGUMENTS.md` - append Challenge section
+- `output/interpretations/feature$ARGUMENTS/results.json` - add `challenge_results` section
+- `output/interpretations/feature$ARGUMENTS/report.md` - append Challenge section
+
+### JSON Schema for challenge_results
+
+> **REQUIRED:** Copy `active_token_idx` → `token_idx` and `all_tokens` from batch_test output for ALL test arrays.
+
+```json
+{
+  "challenge_results": {
+    "counterexamples": [
+      {"text": "...", "activation": 0.XXX, "token": "...", "token_idx": N, "all_tokens": [...], "expected": "no fire", "outcome": "..."}
+    ],
+    "alternative_tests": [
+      {"test_type": "...", "text": "...", "activation": 0.XXX, "token": "...", "token_idx": N, "all_tokens": [...], "implication": "..."}
+    ],
+    "minimal_pairs": {
+      "description": "...",
+      "grid": [
+        {"condition": "...", "text": "...", "activation": 0.XXX, "token": "...", "token_idx": N, "all_tokens": [...]}
+      ],
+      "conclusion": "..."
+    },
+    "surprising_predictions": [
+      {"text": "...", "rationale": "...", "activation": 0.XXX, "token": "...", "token_idx": N, "all_tokens": [...], "result": "confirmed|refuted"}
+    ],
+    "verdict": "CONFIRMED|REFINED|REFUTED|UNCERTAIN",
+    "post_challenge_confidence": 0.XX
+  }
+}
+```
 
 ### Append to Markdown Report:
 
@@ -136,53 +128,35 @@ Based on verdict, update:
 
 # Challenge Results
 
-**Date:** YYYY-MM-DD
-**Verdict:** [CONFIRMED/REFINED/REFUTED/UNCERTAIN]
-**Post-Challenge Confidence:** X%
+**Date:** YYYY-MM-DD | **Verdict:** [CONFIRMED/REFINED/REFUTED/UNCERTAIN] | **Post-Challenge Confidence:** X%
 
 ## Adversarial Tests
 
-### Counterexample Hunt
+**Counterexample Hunt:**
 | # | Text | Expected | Actual | Result |
 |---|------|----------|--------|--------|
-| 1 | ... | No fire | 0.000 | As expected |
-| 2 | ... | No fire | 0.085 | SURPRISE - fires! |
+**Analysis:** [What revealed]
 
-**Analysis:** [What counterexamples reveal]
-
-### Alternative Explanation Tests
+**Alternative Explanation Tests:**
 | # | Test Type | Text | Activation | Implication |
 |---|-----------|------|------------|-------------|
-| 1 | Position | ... | ... | ... |
-| 2 | Tokenization | ... | ... | ... |
+**Analysis:** [What revealed]
 
-**Analysis:** [What alternative tests reveal]
-
-### Minimal Pair Grid
+**Minimal Pair Grid:**
 | | "your" | "my" | "the" |
 |---|---|---|---|
-| "Save" | 0.18 | 0.00 | 0.00 |
-| "Keep" | 0.11 | 0.00 | 0.00 |
-| "Take" | 0.00 | 0.00 | 0.00 |
+| "Save/Keep/Take" | ... | ... | ... |
+**Analysis:** [What grid reveals]
 
-**Analysis:** [What the grid reveals about necessary conditions]
-
-### Surprising Predictions
+**Surprising Predictions:**
 | # | Text | Rationale | Activation | Result |
 |---|------|-----------|------------|--------|
-| 1 | ... | Should fire because... | 0.09 | CONFIRMED |
 
 ## Refined Interpretation
-
-[If REFINED: State the updated hypothesis]
-[If REFUTED: State the new hypothesis]
-[If CONFIRMED: State why original holds]
+[REFINED: updated hypothesis | REFUTED: new hypothesis | CONFIRMED: why original holds]
 
 ## Key Learnings
-
-1. [What we learned from challenging]
-2. [Boundary conditions discovered]
-3. [Confidence adjustments and why]
+1. [What learned] 2. [Boundary conditions] 3. [Confidence adjustments]
 ```
 
 ## Guidelines

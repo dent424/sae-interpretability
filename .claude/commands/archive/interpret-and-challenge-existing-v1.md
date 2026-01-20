@@ -1,3 +1,15 @@
+# ARCHIVED: interpret-and-challenge-existing.md - Pre-Discriminating-Tests Version
+
+This file was archived on 2026-01-19 before implementing hypothesis-discriminating tests.
+
+The old version used "10 positive, 10 negative" tests that only confirmed ONE hypothesis
+worked, without distinguishing between competing hypotheses.
+
+See the current version in .claude/commands/interpret-and-challenge-existing.md for the updated methodology
+that includes baseline, boundary, and discriminating tests.
+
+---
+
 # Interpret and Challenge SAE Feature (from existing data)
 
 Run full interpretation pipeline for feature **$ARGUMENTS**: first interpret, then challenge. Uses pre-existing analysis data.
@@ -50,7 +62,7 @@ output/interpretations/feature$ARGUMENTS/audit.jsonl
 **After EVERY step**, append a JSON line with:
 - `step`: Step number (e.g., "1.1", "2.3")
 - `name`: Step name
-- `timestamp`: Current time in ISO 8601 format (see Timestamp section below)
+- `timestamp`: Current time in ISO 8601 format
 - `action`: Type of action (`read_file`, `hypothesis_generation`, `test_design`, `modal_command`, `challenge_test`, `evaluation`, `synthesis`)
 - `command`: Exact bash command if applicable
 - `decision`: What you decided/concluded
@@ -58,14 +70,6 @@ output/interpretations/feature$ARGUMENTS/audit.jsonl
 - `output_summary`: Key metrics/results from this step
 
 This audit trail is **append-only**. Never delete previous entries.
-
-### Timestamps
-
-**Get real timestamps** using the platform-agnostic command:
-```bash
-py -3.12 batch_utils.py timestamp
-```
-This outputs an ISO 8601 UTC timestamp (e.g., `2026-01-19T19:57:03Z`). Run this command before each audit entry and use the actual output - do NOT use placeholder timestamps.
 
 ---
 
@@ -143,21 +147,15 @@ Based on the n-grams and top activations, generate 2-3 hypotheses. Consider:
 {"step": "1.2", "name": "Generate Hypotheses", "timestamp": "<ISO 8601>", "action": "hypothesis_generation", "decision": "Generated N hypotheses", "justification": "<why these hypotheses based on data>", "output_summary": {"hypotheses": [{"id": 1, "text": "..."}, ...]}}
 ```
 
-### Step 1.3: Design Hypothesis-Discriminating Tests
+### Step 1.3: Design and Run Batch Tests
 
-Design THREE test categories:
-1. **Baseline (3-5):** All hypotheses predict FIRE. Confirms feature works. If these fail, check feature/hypotheses.
-2. **Boundary (3-5):** All hypotheses predict NO FIRE. Confirms boundaries. If these fire, hypotheses too narrow.
-3. **Discriminating (8-12) ← MOST IMPORTANT:** Hypotheses DISAGREE. For each hypothesis pair, create 2-3 tests where one predicts FIRE and other predicts NO FIRE.
-
-**Document predictions BEFORE running:**
-| Text | H1 Predicts | H2 Predicts | H3 Predicts | Actual | Supports |
-|------|-------------|-------------|-------------|--------|----------|
-| "..." | fire | no fire | no fire | ? | ? |
+For each hypothesis, create:
+- **10 POSITIVE examples** (text that SHOULD activate this feature)
+- **10 NEGATIVE examples** (text that should NOT activate, testing boundaries)
 
 Test ALL examples in a single call:
 ```bash
-py -3.12 run_modal_utf8.py batch_test --feature-idx $ARGUMENTS --output-dir output/interpretations/feature$ARGUMENTS --fresh --texts "baseline1|baseline2|...|boundary1|...|discriminating1|..."
+py -3.12 run_modal_utf8.py batch_test --feature-idx $ARGUMENTS --output-dir output/interpretations/feature$ARGUMENTS --fresh --texts "positive 1|positive 2|...|negative 1|negative 2|..."
 ```
 
 **Important:**
@@ -168,8 +166,6 @@ py -3.12 run_modal_utf8.py batch_test --feature-idx $ARGUMENTS --output-dir outp
 
 > **Field Mapping:** Copy from batch_test output: `max_activation` → `activation`, `active_token` → `token`, `active_token_idx` → `token_idx`, `all_tokens` → `all_tokens`. The `token_idx` and `all_tokens` fields are REQUIRED in results.json.
 
-> **NEVER TRUNCATE:** Always copy the complete `all_tokens` array from batch_test output. Do NOT abbreviate with `["truncated"]` or similar - the full token list is required for reproducibility.
-
 **After this step, update the JSON:**
 
 > **REQUIRED:** Copy `active_token_idx` → `token_idx` and `all_tokens` from batch_test output.
@@ -178,26 +174,13 @@ py -3.12 run_modal_utf8.py batch_test --feature-idx $ARGUMENTS --output-dir outp
 {
   ...existing fields...,
   "interpretation_phase": {
-    "hypotheses": [...],
-    "test_design": {
-      "baseline_tests": [
-        {"text": "...", "all_hypotheses_predict": "fire"}
-      ],
-      "boundary_tests": [
-        {"text": "...", "all_hypotheses_predict": "no fire"}
-      ],
-      "discriminating_tests": [
-        {
-          "text": "...",
-          "predictions": {"H1": "fire", "H2": "no fire", "H3": "no fire"},
-          "discriminates_between": ["H1", "H2"]
-        }
-      ]
-    },
+    "hypotheses": [
+      {"id": 1, "description": "...", "result": "SUPPORTED|REJECTED|PARTIAL"},
+      ...
+    ],
     "test_results": [
-      {"text": "...", "activation": 0.XXX, "token": "...", "token_idx": N, "all_tokens": [...],
-       "test_type": "baseline|boundary|discriminating",
-       "predictions": {"H1": "fire", "H2": "no fire"}, "supports": "H1"}
+      {"text": "...", "activation": 0.XXX, "token": "...", "token_idx": N, "all_tokens": [...], "expected": true, "actual": true},
+      ...
     ]
   }
 }
@@ -205,7 +188,7 @@ py -3.12 run_modal_utf8.py batch_test --feature-idx $ARGUMENTS --output-dir outp
 
 **Audit this step:** Append to `feature$ARGUMENTS/audit.jsonl`:
 ```json
-{"step": "1.3", "name": "Design and Run Discriminating Tests", "timestamp": "<ISO 8601>", "action": "modal_command", "command": "<exact batch_test command>", "decision": "<test categories designed>", "justification": "<how tests discriminate between hypotheses>", "output_summary": {"baseline_count": N, "boundary_count": N, "discriminating_count": N}}
+{"step": "1.3", "name": "Design and Run Batch Tests", "timestamp": "<ISO 8601>", "action": "modal_command", "command": "<exact batch_test command>", "decision": "<which hypotheses supported/refuted>", "justification": "<interpretation of test results>", "output_summary": {"accuracy": X, "tp": N, "tn": N, "fp": N, "fn": N}}
 ```
 
 **SAFEGUARD:** If ALL activations are 0.0:
@@ -243,26 +226,12 @@ py -3.12 run_modal_utf8.py ablate_context --feature-idx $ARGUMENTS --text "Examp
 {"step": "1.4", "name": "Context Ablation", "timestamp": "<ISO 8601>", "action": "modal_command", "command": "<exact ablate_context command>", "decision": "Critical token: <token>", "justification": "<what ablation reveals>", "output_summary": {"target_token": "...", "critical_token": "...", "cliff_drop": X, "minimum_context": "..."}}
 ```
 
-### Step 1.5: Evaluate Hypothesis Support
+### Step 1.5: Initial Conclusion
 
-#### Score Each Hypothesis
-
-For **discriminating tests only**, count how well each hypothesis predicted:
-- **Supported**: Hypothesis predicted correctly (predicted fire and fired, OR predicted no fire and didn't fire)
-- **Refuted**: Hypothesis predicted incorrectly
-
-| Hypothesis | Supported | Refuted | Score |
-|------------|-----------|---------|-------|
-| H1 | 6 | 2 | 6/8 = 75% |
-| H2 | 3 | 5 | 3/8 = 38% |
-| H3 | 2 | 6 | 2/8 = 25% |
-
-#### Decision Rules
-- **Clear Winner:** >70% accuracy AND >2x runner-up → Select and proceed to Phase 2
-- **Mixed Evidence:** Scores within 20% → Design more tests or merge hypotheses
-- **No Winner:** All <50% → Review what actually fired, generate new hypotheses, return to Step 1.2
-
-State: "H[N] selected as leading hypothesis with X/Y discriminating test accuracy because [justification]"
+Evaluate:
+- Which hypotheses are supported by the evidence?
+- Which are falsified?
+- Does the ablation confirm which tokens are causally necessary?
 
 **After this step, update the JSON:**
 ```json
@@ -270,11 +239,6 @@ State: "H[N] selected as leading hypothesis with X/Y discriminating test accurac
   ...existing fields...,
   "interpretation_phase": {
     ...existing fields...,
-    "hypothesis_scores": [
-      {"id": 1, "supported": N, "refuted": N, "score": "N/M", "accuracy": 0.XX},
-      ...
-    ],
-    "winner": {"id": N, "accuracy": 0.XX, "justification": "..."},
     "initial_conclusion": "...",
     "initial_confidence": 0.XX,
     "initial_label": "..."
@@ -284,14 +248,14 @@ State: "H[N] selected as leading hypothesis with X/Y discriminating test accurac
 
 **Audit this step:** Append to `feature$ARGUMENTS/audit.jsonl`:
 ```json
-{"step": "1.5", "name": "Evaluate Hypothesis Support", "timestamp": "<ISO 8601>", "action": "evaluation", "decision": "H[N] selected as winner with X% accuracy", "justification": "<why this hypothesis won>", "output_summary": {"winner": "H1", "winner_accuracy": 0.XX, "runner_up": "H2", "runner_up_accuracy": 0.XX}}
+{"step": "1.5", "name": "Initial Conclusion", "timestamp": "<ISO 8601>", "action": "evaluation", "decision": "<initial interpretation>", "justification": "<summary of evidence>", "output_summary": {"confidence": X, "label": "...", "supported_hypotheses": [1], "refuted_hypotheses": [2, 3]}}
 ```
 
 ---
 
 ## Phase 2: Challenge
 
-Now switch to **devil's advocate** mode. Your job is to **break** the winning hypothesis from Phase 1.
+Now switch to **devil's advocate** mode. Your job is to **break** the hypothesis you just created.
 
 ### Step 2.1: Counterexample Hunt (5-8 tests)
 
@@ -465,10 +429,11 @@ Before finalizing outputs, re-read source files and verify all values:
 | stats.max_activation | _______ |
 | stats.tokens_scanned | _______ |
 
-**Re-read latest batch_test output.** Verify your hypothesis scoring:
-- Total discriminating tests: _______
-- Winner hypothesis: _______
-- Winner accuracy: _______
+**Re-read latest batch_test output.** Verify your test accuracy calculation:
+- Total tests: _______
+- True positives: _______
+- True negatives: _______
+- Accuracy: _______ (calculate: (TP+TN)/Total)
 
 **Cross-check:** Do the values in your working notes match these source values? If not, correct them now.
 
@@ -515,17 +480,34 @@ Write the final report to `output/interpretations/feature$ARGUMENTS/report.md` w
 ```markdown
 # Feature [N] Interpretation Report
 
-**Date:** YYYY-MM-DD | **Verdict:** [CONFIRMED/REFINED/REFUTED/UNCERTAIN] | **Confidence:** X%
+**Date:** YYYY-MM-DD
+**Final Verdict:** [CONFIRMED/REFINED/REFUTED/UNCERTAIN]
+**Confidence:** X%
+
+---
 
 ## Executive Summary
-[2-3 sentence summary incorporating learnings from both phases]
-**Label:** [Short label] | **Category:** [Category > Subcategory]
+
+[2-3 sentence summary of what this feature detects, incorporating learnings from both interpretation AND challenge phases]
+
+**Label:** [Short label, refined based on challenge results]
+**Category:** [Category > Subcategory]
+
+---
 
 ## The Pattern
-**What It Detects:** [Description refined by challenge testing]
-**Necessary Conditions:** [Bullet list validated by minimal pairs]
-**Boundary Conditions:** [Edge cases that don't fire]
-**Does NOT Detect:** [Similar patterns that don't activate]
+
+### What It Detects
+[Clear description of the pattern, refined by challenge testing]
+
+### Necessary Conditions
+[Bullet list of what MUST be present for activation, validated by minimal pairs]
+
+### Boundary Conditions
+[What edge cases don't fire, discovered during challenge]
+
+### Does NOT Detect
+[Common misconceptions or similar-looking patterns that don't activate]
 
 ---
 
@@ -534,19 +516,24 @@ Write the final report to `output/interpretations/feature$ARGUMENTS/report.md` w
 ### Corpus Statistics
 | Metric | Value |
 |--------|-------|
-| Tokens scanned / Activation rate / Mean / Max | ... |
+| Tokens scanned | ... |
+| Activation rate | ... |
+| Mean activation | ... |
+| Max activation | ... |
 
-### Key Examples (Top 5)
+### Key Examples
+[Top 5 most illustrative examples with activation values - curated from both phases]
+
 | Activation | Token | Context | Why It Fires |
 |------------|-------|---------|--------------|
-
-### Hypothesis Discrimination
-| Hypothesis | Description | Accuracy | Result |
-|------------|-------------|----------|--------|
+| 0.XXX | '...' | "..." | [explanation] |
 
 ### Minimal Pair Evidence
+[The most informative minimal pair comparisons from challenge phase]
+
 | Test A | Activation | Test B | Activation | Conclusion |
 |--------|------------|--------|------------|------------|
+| "..." | 0.XXX | "..." | 0.000 | [what this proves] |
 
 ---
 
@@ -554,55 +541,94 @@ Write the final report to `output/interpretations/feature$ARGUMENTS/report.md` w
 
 ### Phase 1: Initial Interpretation
 
-**Data Source:** `output/feature_$ARGUMENTS.json` (pre-existing)
-**Top Tokens:** [Table of top 20] | **N-gram Analysis:** [Key patterns] | **Top Corpus Activations:** [Top 10]
+#### Data Gathering
+**Source:** `output/feature_$ARGUMENTS.json` (pre-existing)
 
-**Initial Hypotheses:** 1. [...] 2. [...] 3. [...]
+##### Top Tokens
+[Table of top 20 tokens]
 
-**Batch Test Command:** [command with all texts]
+##### N-gram Analysis
+[Key patterns from bigrams, trigrams, 4-grams]
 
-| Type | # | Text | Activation | Token | H1 | H2 | H3 | Supports |
-|------|---|------|------------|-------|----|----|---------|---------|
-[All test results]
+##### Top Corpus Activations
+[Top 10 with full context]
 
-**Hypothesis Scoring:** | Hypothesis | Supported | Refuted | Accuracy |
-**Winner:** H[N] with X% accuracy
+#### Initial Hypotheses
+1. [Hypothesis 1]
+2. [Hypothesis 2]
+3. [Hypothesis 3]
 
-**Ablation:** [Command] | [Results table] | [Interpretation]
+#### Hypothesis Testing
+**Command:** [batch_test command with all texts]
 
-**Initial Conclusion:** [What Phase 1 concluded]
+| # | Type | Text | Activation | Token | Result |
+|---|------|------|------------|-------|--------|
+| 1 | POS | ... | ... | ... | Y/N |
+
+#### Ablation Analysis
+**Command:** [ablate_context command]
+
+[Ablation results table and interpretation]
+
+#### Initial Conclusion
+[What Phase 1 concluded, with confidence level]
 
 ---
 
 ### Phase 2: Adversarial Challenge
 
-**Counterexample Hunt:**
+#### Counterexample Hunt
 | # | Text | Expected | Actual | Result |
-**Analysis:** [What revealed]
+|---|------|----------|--------|--------|
+| 1 | ... | No fire | 0.XXX | [outcome] |
 
-**Alternative Explanation Tests:**
+**Analysis:** [What counterexamples revealed]
+
+#### Alternative Explanation Tests
 | # | Test Type | Text | Activation | Implication |
-**Analysis:** [Alternative explanations ruled out?]
+|---|-----------|------|------------|-------------|
+| 1 | Position | ... | ... | ... |
 
-**Minimal Pair Grid:**
+**Analysis:** [Were alternative explanations ruled out?]
+
+#### Minimal Pair Grid
 | | Var1 | Var2 | Var3 | Var4 |
-| CondA/CondB | ... |
-**Analysis:** [What grid reveals]
+|---|---|---|---|---|
+| CondA | 0.XX | 0.XX | 0.XX | 0.XX |
+| CondB | 0.XX | 0.XX | 0.XX | 0.XX |
 
-**Surprising Predictions:**
+**Analysis:** [What the grid reveals]
+
+#### Surprising Predictions
 | # | Text | Rationale | Activation | Result |
+|---|------|-----------|------------|--------|
+| 1 | ... | Should fire because... | 0.XX | Y/N |
 
-**Challenge Verdict:** [CONFIRMED/REFINED/REFUTED/UNCERTAIN with justification]
+#### Challenge Verdict
+[CONFIRMED/REFINED/REFUTED/UNCERTAIN with justification]
 
 ---
 
 ## Synthesis
-**How Challenge Changed Interpretation:** [Refinements, boundary conditions, confidence adjustments]
-**Remaining Uncertainties:** [What's unclear]
-**Related Features:** [Worth exploring]
+
+### How Challenge Changed the Interpretation
+[Bullet list of refinements, boundary conditions discovered, confidence adjustments]
+
+### Remaining Uncertainties
+[What's still unclear or would benefit from more testing]
+
+### Related Features to Investigate
+[If any patterns suggest related features worth exploring]
+
+---
 
 ## Conclusion
-[Final synthesis] **Linguistic Function:** [...] **Potential Applications:** [...]
+
+[Final 2-3 paragraph synthesis: what this feature does, how confident we are, what makes it interesting or useful for interpretability]
+
+**Linguistic Function:** [One sentence describing the linguistic/semantic role]
+
+**Potential Applications:** [How this feature could be used - e.g., detecting certain writing styles, sentiment patterns, etc.]
 ```
 
 **Audit this step:** Append to `feature$ARGUMENTS/audit.jsonl`:

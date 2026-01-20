@@ -1,3 +1,15 @@
+# ARCHIVED: interpret-existing.md - Pre-Discriminating-Tests Version
+
+This file was archived on 2026-01-19 before implementing hypothesis-discriminating tests.
+
+The old version used "10 positive, 10 negative" tests that only confirmed ONE hypothesis
+worked, without distinguishing between competing hypotheses.
+
+See the current version in .claude/commands/interpret-existing.md for the updated methodology
+that includes baseline, boundary, and discriminating tests.
+
+---
+
 # Interpret SAE Feature (from existing data)
 
 Interpret SAE feature **$ARGUMENTS** using iterative hypothesis testing, reading from pre-existing analysis data.
@@ -50,7 +62,7 @@ output/interpretations/feature$ARGUMENTS/audit.jsonl
 **After EVERY step**, append a JSON line with:
 - `step`: Step number (e.g., "1", "2", "3")
 - `name`: Step name
-- `timestamp`: Current time in ISO 8601 format (see Timestamp section below)
+- `timestamp`: Current time in ISO 8601 format
 - `action`: Type of action (`read_file`, `hypothesis_generation`, `test_design`, `modal_command`, `evaluation`, `synthesis`)
 - `command`: Exact bash command if applicable
 - `decision`: What you decided/concluded
@@ -58,14 +70,6 @@ output/interpretations/feature$ARGUMENTS/audit.jsonl
 - `output_summary`: Key metrics/results from this step
 
 This audit trail is **append-only**. Never delete previous entries.
-
-### Timestamps
-
-**Get real timestamps** using the platform-agnostic command:
-```bash
-py -3.12 batch_utils.py timestamp
-```
-This outputs an ISO 8601 UTC timestamp (e.g., `2026-01-19T19:57:03Z`). Run this command before each audit entry and use the actual output - do NOT use placeholder timestamps.
 
 ---
 
@@ -115,27 +119,22 @@ Based on the n-grams and top activations, generate 2-3 hypotheses. The n-gram an
 {"step": "2", "name": "Generate Hypotheses", "timestamp": "<ISO 8601>", "action": "hypothesis_generation", "decision": "Generated N hypotheses", "justification": "<why these hypotheses based on the data>", "output_summary": {"hypotheses": [{"id": 1, "text": "..."}, ...]}}
 ```
 
-### Step 3: Design Hypothesis-Discriminating Tests
+### Step 3: Design Test Examples
+For each hypothesis, create:
+- **10 POSITIVE examples** (text that SHOULD activate this feature)
+- **10 NEGATIVE examples** (text that should NOT activate, testing boundaries)
 
-Design THREE test categories:
-1. **Baseline (3-5):** All hypotheses predict FIRE. Confirms feature works. If these fail, check feature/hypotheses.
-2. **Boundary (3-5):** All hypotheses predict NO FIRE. Confirms boundaries. If these fire, hypotheses too narrow.
-3. **Discriminating (8-12) ← MOST IMPORTANT:** Hypotheses DISAGREE. For each hypothesis pair, create 2-3 tests where one predicts FIRE and other predicts NO FIRE.
-
-**Document predictions BEFORE running:**
-| Text | H1 Predicts | H2 Predicts | H3 Predicts | Actual | Supports |
-|------|-------------|-------------|-------------|--------|----------|
-| "..." | fire | no fire | no fire | ? | ? |
+Critical for negatives: Use similar words in DIFFERENT contexts to test if it's semantic vs lexical.
 
 **Audit this step:** Append to `feature$ARGUMENTS/audit.jsonl`:
 ```json
-{"step": "3", "name": "Design Discriminating Tests", "timestamp": "<ISO 8601>", "action": "test_design", "decision": "Designed N test cases", "justification": "<how tests discriminate between hypotheses>", "output_summary": {"baseline_count": N, "boundary_count": N, "discriminating_count": N}}
+{"step": "3", "name": "Design Test Examples", "timestamp": "<ISO 8601>", "action": "test_design", "decision": "Designed N test cases", "justification": "<rationale for positive/negative selection>", "output_summary": {"positive_count": 10, "negative_count": 10, "positive_examples": ["..."], "negative_examples": ["..."]}}
 ```
 
 ### Step 4: Run Batch Tests
 Test ALL examples in a single call:
 ```bash
-py -3.12 run_modal_utf8.py batch_test --feature-idx $ARGUMENTS --output-dir output/interpretations/feature$ARGUMENTS --fresh --texts "baseline1|baseline2|...|boundary1|...|discriminating1|..."
+py -3.12 run_modal_utf8.py batch_test --feature-idx $ARGUMENTS --output-dir output/interpretations/feature$ARGUMENTS --fresh --texts "positive 1|positive 2|...|negative 1|negative 2|..."
 ```
 
 **Important:**
@@ -146,11 +145,9 @@ py -3.12 run_modal_utf8.py batch_test --feature-idx $ARGUMENTS --output-dir outp
 
 > **Field Mapping:** Copy from batch_test output: `max_activation` → `activation`, `active_token` → `token`, `active_token_idx` → `token_idx`, `all_tokens` → `all_tokens`. The `token_idx` and `all_tokens` fields are REQUIRED in results.json.
 
-> **NEVER TRUNCATE:** Always copy the complete `all_tokens` array from batch_test output. Do NOT abbreviate with `["truncated"]` or similar - the full token list is required for reproducibility.
-
 **Audit this step:** Append to `feature$ARGUMENTS/audit.jsonl`:
 ```json
-{"step": "4", "name": "Run Batch Tests", "timestamp": "<ISO 8601>", "action": "modal_command", "command": "<exact command>", "decision": "<which hypotheses supported/refuted>", "justification": "<interpretation of results>", "output_summary": {"baseline_passed": N, "boundary_passed": N, "discriminating_results": {...}}}
+{"step": "4", "name": "Run Batch Tests", "timestamp": "<ISO 8601>", "action": "modal_command", "command": "<exact command>", "decision": "<which hypotheses supported/refuted>", "justification": "<interpretation of results>", "output_summary": {"accuracy": X, "tp": N, "tn": N, "fp": N, "fn": N}}
 ```
 
 **SAFEGUARD:** If ALL activations are 0.0:
@@ -182,30 +179,15 @@ Critical token: "never" (removing it drops activation by 58%)
 {"step": "4a", "name": "Context Ablation", "timestamp": "<ISO 8601>", "action": "modal_command", "command": "<exact command>", "decision": "Critical token: <token>", "justification": "<what ablation reveals about causal structure>", "output_summary": {"target_token": "...", "critical_token": "...", "cliff_drop": X, "minimum_context": "..."}}
 ```
 
-### Step 5: Evaluate Hypothesis Support
-
-#### Score Each Hypothesis
-
-For **discriminating tests only**, count how well each hypothesis predicted:
-- **Supported**: Hypothesis predicted correctly (predicted fire and fired, OR predicted no fire and didn't fire)
-- **Refuted**: Hypothesis predicted incorrectly
-
-| Hypothesis | Supported | Refuted | Score |
-|------------|-----------|---------|-------|
-| H1 | 6 | 2 | 6/8 = 75% |
-| H2 | 3 | 5 | 3/8 = 38% |
-| H3 | 2 | 6 | 2/8 = 25% |
-
-#### Decision Rules
-- **Clear Winner:** >70% accuracy AND >2x runner-up → Select and proceed to output
-- **Mixed Evidence:** Scores within 20% → Design more tests or merge hypotheses
-- **No Winner:** All <50% → Review what actually fired, generate new hypotheses, return to Step 2
-
-State: "H[N] selected as final interpretation with X/Y discriminating test accuracy because [justification]"
+### Step 5: Evaluate
+- Which hypotheses are supported by the evidence?
+- Which are falsified?
+- Does the ablation confirm which tokens are causally necessary?
+- Are you confident enough to stop, or should you refine and iterate?
 
 **Audit this step:** Append to `feature$ARGUMENTS/audit.jsonl`:
 ```json
-{"step": "5", "name": "Evaluate Hypothesis Support", "timestamp": "<ISO 8601>", "action": "evaluation", "decision": "H[N] selected with X% accuracy", "justification": "<why this hypothesis won>", "output_summary": {"winner": "H1", "winner_accuracy": 0.XX, "runner_up": "H2", "runner_up_accuracy": 0.XX}}
+{"step": "5", "name": "Evaluate", "timestamp": "<ISO 8601>", "action": "evaluation", "decision": "<final interpretation>", "justification": "<summary of evidence>", "output_summary": {"confidence": X, "label": "...", "supported_hypotheses": [1], "refuted_hypotheses": [2, 3]}}
 ```
 
 ### Step 6: Output
@@ -223,7 +205,7 @@ Before writing final outputs, re-read source files and fill in this verification
 | Max activation | stats.max_activation | _______ |
 | Tokens scanned | stats.tokens_scanned | _______ |
 
-**Re-read `output/interpretations/feature$ARGUMENTS/batch_test_$ARGUMENTS.json` now.** Verify hypothesis scoring matches what you're reporting.
+**Re-read `output/batch_test_$ARGUMENTS.json` now.** Verify test results match what you're reporting.
 
 Only proceed to write outputs after completing this verification.
 
@@ -265,19 +247,8 @@ Write final results to (all in `output/interpretations/feature$ARGUMENTS/`):
   "hypotheses": [
     {"id": 1, "description": "...", "result": "SUPPORTED|REJECTED|PARTIAL"}
   ],
-  "hypothesis_scores": [
-    {"id": 1, "supported": N, "refuted": N, "accuracy": 0.XX}
-  ],
-  "winner": {"id": N, "accuracy": 0.XX, "justification": "..."},
-  "test_design": {
-    "baseline_tests": [...],
-    "boundary_tests": [...],
-    "discriminating_tests": [...]
-  },
   "test_results": [
-    {"text": "...", "activation": 0.XXX, "token": "...", "token_idx": N, "all_tokens": [...],
-     "test_type": "baseline|boundary|discriminating",
-     "predictions": {"H1": "fire", "H2": "no fire"}, "supports": "H1"}
+    {"text": "...", "activation": 0.XXX, "token": "...", "token_idx": N, "all_tokens": [...], "expected": true, "actual": true}
   ],
   "ablation_results": {
     "text": "...",
@@ -304,72 +275,134 @@ Write final results to (all in `output/interpretations/feature$ARGUMENTS/`):
 ```markdown
 # Feature [N] Interpretation Report
 
-**Date:** YYYY-MM-DD | **Iterations:** N | **Confidence:** X%
+**Date:** YYYY-MM-DD
+**Iterations:** N
+**Final Confidence:** X%
+
+---
 
 ## Final Interpretation
-[1-2 sentence summary] **Label:** [Short label] | **Category:** [Category > Subcategory]
-> **Causal Masking Note:** [Reminder about left-context only]
+
+[1-2 sentence summary of what the feature detects]
+
+**Label:** [Short label]
+**Category:** [Category > Subcategory]
+
+> **Causal Masking Note:** [Always include this reminder about left-context only]
 
 ---
 
 # Interpretation Process
 
-## Step 1: Data Gathering
-**Source:** `feature data/feature_$ARGUMENTS.json` (pre-existing)
+## Step 1: Initial Data Gathering
+
+**Source:** `output/feature_$ARGUMENTS.json` (pre-existing)
+
 ### Corpus Statistics
-[Table: tokens scanned, activation rate, mean, max]
+[Table with tokens scanned, activation rate, mean, max]
+
 ### Top Tokens by Count
-[Table: top 20 tokens with count and mean activation]
+[Full table of top 20 tokens with count and mean activation]
+
 ### Top 10 Corpus Activations
-[Table: rank, activation, token, full context]
+[Table showing rank, activation, token, and full context for each]
+
+---
 
 ## Step 2: N-gram Analysis
-**Bigrams:** [Table] | **Trigrams:** [Table] | **4-grams:** [Table]
+
+### Bigrams (2-grams)
+[Full table from JSON output]
+
+### Trigrams (3-grams)
+[Full table from JSON output]
+
+### 4-grams
+[Full table from JSON output]
+
+---
 
 ## Step 3: Hypothesis Generation
-[List each hypothesis]
 
-## Step 4: Test Design
-**Baseline (all predict fire):** [Table: #, Text, Rationale]
-**Boundary (all predict no fire):** [Table: #, Text, Rationale]
-**Discriminating (disagree):** [Table: #, Text, H1/H2/H3 Predicts, Rationale]
+[List each hypothesis with description]
 
-## Step 5: Batch Test Results
-**Command:** [exact command with all texts]
+---
 
-| Type | # | Text | Activation | Token | H1 | H2 | H3 | Supports |
-|------|---|------|------------|-------|----|----|---------|---------|
-[All test results in single table]
+## Step 4: Test Example Design
 
-### Hypothesis Scoring
-| Hypothesis | Supported | Refuted | Accuracy |
-|------------|-----------|---------|----------|
-**Winner:** H[N] with X% accuracy
+### Positive Examples (Expected to Activate)
+[Table with #, Text, Rationale for ALL 10 positive examples]
 
-## Step 6: Ablation Analysis
-**Command:** [exact command] | **Target:** [Token]
-[Table: Depth, Left Context, Activation, Status]
-**Critical token:** [token] | **Minimum context:** [context]
+### Negative Examples (Expected NOT to Activate)
+[Table with #, Text, Rationale for ALL 10 negative examples]
 
-## Step 7: Final Evaluation
-[Table: Hypothesis, Result (SUPPORTED/PARTIAL/REFUTED), Evidence]
+---
 
-## Pattern Summary
-**Pattern 1:** [name] - [Table: Left Context, Fires On, Activation]
-**Does NOT Fire On:** [Bullet list]
+## Step 5: Batch Test Execution
+
+**Command:**
+[exact command used including all test texts]
+
+### Results
+[Table with #, Type (POS/NEG), Activation, Token, Text for ALL 20 tests]
+
+### Test Summary
+[Table with total tests, TP, TN, FP, FN, accuracy]
+
+---
+
+## Step 6: Context Ablation Analysis
+
+**Command:**
+[exact command used]
+
+**Target:** [Token and position]
+
+### Ablation Results
+[Table showing Depth, Tokens Removed, Left Context, Activation, Status for each step]
+
+### Ablation Analysis
+[Table with cliff depth, cliff drop, critical token, minimum context]
+
+**Interpretation:** [1-2 sentences explaining what ablation reveals]
+
+---
+
+## Step 7: Hypothesis Evaluation
+
+[Table with Hypothesis, Result (SUPPORTED/PARTIAL/REFUTED), Evidence]
+
+---
+
+## Final Pattern Summary
+
+### Pattern 1: [name] (Strength range)
+[Table showing Left Context, Fires On, Activation for examples]
+
+### Pattern 2: [name] (if applicable)
+[Same format]
+
+### Does NOT Fire On
+[Bullet list of negative conditions]
+
+---
 
 ## Conclusion
-[Summary paragraph] **Linguistic function:** [description]
+
+[Summary paragraph with key findings numbered]
+
+**Linguistic function:** [What this pattern means in natural language]
 ```
 
 ## Iteration
 Default: Run up to 3 iterations. Stop early if confident.
 
-## Tips
-1. **N-grams first**: Top trigrams often reveal the pattern directly
-2. **Use ablation**: Distinguishes causally necessary vs correlated context
-3. **Document predictions BEFORE running**: Commit to what each hypothesis predicts
-4. **Remember causal masking**: Only LEFT context matters at firing position
+## Tips for Effective Testing
+1. **Check n-grams first**: The top trigrams often reveal the pattern directly
+2. **Use ablation**: It tells you which context is causally necessary vs just correlated
+3. **Minimal pairs**: Test "never in my life" vs "always in my life" to isolate key elements
+4. **Batch strategically**: All 20 tests fit easily in one batch_test call
+5. **Remember causal masking**: Only LEFT context matters at the firing position. Don't create separate pattern categories based on what comes AFTER the token where the feature fires.
 
 ## Advanced: Full Analysis with Ablation
 For deep analysis, run with automatic ablation on top activations:

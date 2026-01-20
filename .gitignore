@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Claude Code temp files
+tmpclaude-*
+
+# Data files (too large for git)
+Data/
+feature data/
+
+# Generated output
+output/
+*.log
+modal_output.txt
+wrapper_output.txt
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
