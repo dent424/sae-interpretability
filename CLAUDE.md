@@ -122,14 +122,35 @@ Use slash commands to interpret SAE features with structured hypothesis testing.
 
 ### Slash Commands
 
+#### Interpretation Commands
 | Command | Description |
 |---------|-------------|
 | `/interpret <feature_id>` | Full analysis: gather data from Modal, generate hypotheses, test, interpret |
 | `/interpret-existing <feature_id>` | Same workflow but reads from `feature data/feature_<id>.json` |
 | `/interpret-and-challenge <feature_id>` | Full analysis + adversarial challenge phase |
 | `/interpret-and-challenge-existing <feature_id>` | Challenge workflow from `feature data/feature_<id>.json` |
+| `/challenge <feature_id>` | Run challenge phase only on existing interpretation |
+
+#### Batch/Parallel Commands
+| Command | Description |
+|---------|-------------|
 | `/interpret-parallel <id1>, <id2>, ...` | Run multiple interpretations in parallel |
 | `/interpret-parallel-existing <id1>, <id2>, ...` | Parallel from `feature data/` files |
+| `/interpret-batch` | Batch workflow: find uninterpreted features, run in parallel, update CSV |
+
+#### Verification Commands
+| Command | Description |
+|---------|-------------|
+| `/verify <feature_id>` | Verify interpretation with logic, causal, and reproducibility checks |
+| `/verify-batch` | Batch verify multiple features, update CSV with results |
+
+#### Audit Commands
+| Command | Description |
+|---------|-------------|
+| `/audit` | Audit all pending features in CSV for structural completeness |
+| `/audit <feature_id>` | Audit single feature's results.json completeness |
+| `/audit-schema` | Validate results.json schema fields, update CSV |
+| `/audit-schema <ids> --fix` | Audit specific features, optionally fix missing fields |
 
 ### Output Structure
 
