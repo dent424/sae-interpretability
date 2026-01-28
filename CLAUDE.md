@@ -147,10 +147,17 @@ Use slash commands to interpret SAE features with structured hypothesis testing.
 #### Audit Commands
 | Command | Description |
 |---------|-------------|
-| `/audit` | Audit all pending features in CSV for structural completeness |
-| `/audit <feature_id>` | Audit single feature's results.json completeness |
-| `/audit-schema` | Validate results.json schema fields, update CSV |
-| `/audit-schema <ids> --fix` | Audit specific features, optionally fix missing fields |
+| `/final_audit` | Comprehensive audit: schema + content + process validation |
+| `/final_audit <feature_id>` | Audit single feature with all three validation layers |
+| `/final_audit --limit N` | Audit first N features only |
+
+#### Fix Commands
+| Command | Description |
+|---------|-------------|
+| `/fix_feature <feature_id>` | Fix single feature (extract fields + generate synthesis) |
+| `/fix_feature <id1>, <id2>, ...` | Fix specific features |
+| `/fix_feature --salvageable` | Fix all features with INCOMPLETE/SCHEMA status |
+| `/fix_feature --dry-run` | Preview what would be fixed without modifying files |
 
 ### Output Structure
 
