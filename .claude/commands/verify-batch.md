@@ -2,17 +2,21 @@
 
 Verify **N** total feature interpretations from Feature_output.csv, running **batch_size** in parallel at a time.
 
-**Usage:** `/verify-batch <batch_size> [total] [sort_by]`
+**Model:** Sub-agents inherit **Opus 4.5** from parent (do NOT specify model parameter).
+
+**Usage:** `/verify-batch <batch_size> [total] [sort_by] [--skip-repro]`
 
 **Arguments:**
 - `batch_size` (required) - How many verifications to run in parallel per batch
 - `total` (optional) - Total features to verify, defaults to batch_size
 - `sort_by` (optional) - Column to sort by: `rank_control` (default) or `rank_nocontrol`
+- `--skip-repro` (optional) - Skip reproducibility check for faster verification
 
 **Examples:**
 - `/verify-batch 3 10` - Verify 10 features, 3 at a time, sorted by rank_control
 - `/verify-batch 5` - Verify 5 features, 5 at a time (single batch)
 - `/verify-batch 3 10 rank_nocontrol` - Verify 10 features sorted by rank_nocontrol
+- `/verify-batch 3 10 --skip-repro` - Fast verification without repro check
 
 ## Instructions
 
@@ -22,6 +26,7 @@ Parse `$ARGUMENTS` to extract:
 - `batch_size` = first number (how many to run in parallel)
 - `total` = second number (total to verify), defaults to batch_size if not specified
 - `sort_by` = third argument if present, must be `rank_control` or `rank_nocontrol`, defaults to `rank_control`
+- `skip_repro` = true if `--skip-repro` flag is present anywhere in arguments
 
 Display: "Will verify {total} features, {batch_size} at a time, sorted by {sort_by}"
 
@@ -79,11 +84,13 @@ Split the remaining feature list into chunks of size `batch_size`.
      Verify SAE feature interpretation for feature {ID}.
 
      1. Read the full instructions from: .claude/commands/verify.md
-     2. Follow ALL steps in that file for feature {ID} (replace $ARGUMENTS with {ID})
-     3. Perform the full verification including reproducibility check.
+     2. Follow ALL steps in that file for feature {ID} (replace $ARGUMENTS with "{ID} {skip_repro_flag}")
+     3. Perform the verification {with_or_without} reproducibility check.
 
      IMPORTANT: Use relative paths only (e.g., "output/interpretations/feature{ID}/"). Absolute paths will trigger permission prompts.
      ```
+     Where `{skip_repro_flag}` is `--skip-repro` if the flag was passed to verify-batch, otherwise empty.
+     Where `{with_or_without}` is "without" if skip_repro is true, otherwise "with".
    - **CRITICAL:** Spawn ALL agents for this batch in a SINGLE message (parallel execution)
 
 3. Wait for all agents in this batch to complete
@@ -145,7 +152,8 @@ The `batch_utils.py` script provides these commands:
 | `backup-csv` | Create Feature_output.csv.backup |
 | `find-unverified --sort-by X --limit N` | Find interpreted features without verification |
 | `check-existing --features 1,2,3` | Check for output files |
-| `update-verify --feature N --status X` | Update verify_status in CSV (called by verify agents) |
+| `update-verify --feature N --status X --reason "..."` | Update verify_status in CSV |
+| `batch-summary --features 1,2,3` | Generate batch summary and update reasons |
 
 All commands output JSON for easy parsing.
 
@@ -166,25 +174,25 @@ Candidate features: 7907, 20276, 14292, 5005, 19056, 3080
 Features to verify: 7907, 20276, 14292, 5005, 19056, 3080
 
 --- Batch 1/2: Verifying features 7907, 20276, 14292 ---
-[3 agents run in parallel]
+[3 Opus 4.5 agents run in parallel]
 Batch 1 complete. Verified 3 features.
 
 --- Batch 2/2: Verifying features 5005, 19056, 3080 ---
-[3 agents run in parallel]
+[3 Opus 4.5 agents run in parallel]
 Batch 2 complete. Verified 3 features.
 
 === BATCH VERIFICATION COMPLETE ===
 Total features verified: 6
 Batches completed: 2
 
-| Feature | Status | Logic | Causal | Repro |
-|---------|--------|-------|--------|-------|
-| 7907    | PASS   | PASS  | PASS   | PASS  |
-| 20276   | PASS   | PASS  | PASS   | PASS  |
-| 14292   | WARN   | WARN  | PASS   | PASS  |
-| 5005    | PASS   | PASS  | PASS   | PASS  |
-| 19056   | PASS   | PASS  | PASS   | PASS  |
-| 3080    | PASS   | PASS  | PASS   | PASS  |
+| Feature | Status | Logic | Causal | Repro | Reason |
+|---------|--------|-------|--------|-------|--------|
+| 7907    | PASS   | PASS  | PASS   | PASS  |        |
+| 20276   | PASS   | PASS  | PASS   | PASS  |        |
+| 14292   | WARN   | WARN  | PASS   | PASS  | High confidence with low accuracy |
+| 5005    | PASS   | PASS  | PASS   | PASS  |        |
+| 19056   | PASS   | PASS  | PASS   | PASS  |        |
+| 3080    | PASS   | PASS  | PASS   | PASS  |        |
 
 Feature_output.csv has been updated with verification results.
 ```

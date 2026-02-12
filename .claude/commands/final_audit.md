@@ -2,6 +2,8 @@
 
 Comprehensive validation combining schema validation, content completeness, and process verification for SAE feature interpretations.
 
+**Model:** Sub-agents inherit **Opus 4.5** from parent (do NOT specify model parameter).
+
 ## Arguments
 
 $ARGUMENTS - Optional: `[feature_ids]` and/or `--limit N`
@@ -127,7 +129,6 @@ For each feature_id:
 
 1. **Spawn validation sub-agent** using Task tool:
    - `subagent_type`: "general-purpose"
-   - `model`: "opus"
    - `description`: "Audit feature {ID}"
    - `prompt`: Use the Sub-Agent Prompt Template below
 
@@ -293,6 +294,25 @@ Status values:
 - `SCHEMA:<missing fields>` - schema validation failed
 - `INCOMPLETE:<reason>` - content validation failed
 - `PROCESS_INCOMPLETE:<missing steps>` - process validation failed
+
+## STRICT STATUS RULES (MANDATORY - NO EXCEPTIONS)
+
+These rules are MANDATORY. Do NOT rationalize, excuse, or override them for any reason:
+
+1. If ANY required schema field is missing/invalid → OVERALL_STATUS = SCHEMA
+2. If ANY content validation fails → OVERALL_STATUS = INCOMPLETE
+3. If ANY required process step is missing from audit.jsonl → OVERALL_STATUS = PROCESS_INCOMPLETE
+4. ONLY if ALL THREE layers fully PASS → OVERALL_STATUS = COMPLETE
+
+**There are NO partial passes. There are NO "minor issues" or "documentation gaps."**
+A missing step IS a failure. An empty field IS a failure.
+Follow these rules LITERALLY and EXACTLY.
+
+Your OVERALL_STATUS must be MECHANICALLY derived from the three layer statuses:
+- SCHEMA_STATUS=FAIL → OVERALL_STATUS starts with "SCHEMA"
+- CONTENT_STATUS=FAIL → OVERALL_STATUS starts with "INCOMPLETE"
+- PROCESS_STATUS=FAIL → OVERALL_STATUS starts with "PROCESS_INCOMPLETE"
+- All PASS → OVERALL_STATUS = "COMPLETE"
 
 ## Response Format
 

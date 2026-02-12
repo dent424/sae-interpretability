@@ -60,7 +60,24 @@ Extract:
 
 ### 2a: Calculate Test Metrics
 
-From `interpretation_phase.test_results`, count:
+From `interpretation_phase.test_results`, derive expected/actual for each test:
+
+**Deriving actual:** `actual = (activation > 0)`
+
+**Deriving expected:** Based on test design:
+- If test has `expected` field: use it directly
+- If test has `supports` field:
+  - `supports: "H3"` (winner hypothesis) → expected = true
+  - `supports: "none"` or non-winner → expected = false
+- If test has `test_type`:
+  - `test_type: "positive"` → expected = true
+  - `test_type: "negative"` → expected = false
+  - `test_type: "baseline"` → expected = true (baseline should fire)
+  - `test_type: "discriminating"` → check `supports` field
+
+**If expected cannot be determined:** Skip that test and note in report.
+
+Then count:
 ```
 TP = expected=true AND actual=true
 FP = expected=false AND actual=true
@@ -99,9 +116,25 @@ GPT-2 uses causal attention. At position N, the model only sees tokens 0 to N-1.
 
 ### 3b: Review Interpretive Text
 
-**Violations** (claims right-context dependency): "fires when followed by X", "detects tokens before [punctuation]", "anticipates/predicts future tokens", "depends on what comes after", "fires when next token is"
+**Violations** (claims right-context dependency):
+- "fires when followed by X"
+- "detects tokens before [punctuation/word]"
+- "anticipates/predicts future tokens"
+- "depends on what comes after"
+- "fires when next token is"
+- "preceding X" (confused with "preceded by X")
+- "in preparation for"
+- "to signal upcoming"
+- "before a [comma/period/space]"
+- "when the next word is"
 
-**Valid patterns** (left-context): "fires when preceded by X", "fires on [token] following [context]", "left context contains X", "after seeing X, fires on Y"
+**Valid patterns** (left-context):
+- "fires when preceded by X"
+- "fires on [token] following [context]"
+- "left context contains X"
+- "after seeing X, fires on Y"
+- "requires prior token to be X"
+- "activates after X appears"
 
 ### 3c: Assess Each Field
 - **PASS**: Correctly describes left-context patterns
@@ -250,8 +283,14 @@ Create `output/interpretations/feature<ID>/verification.md`:
 Use the `batch_utils.py` utility to update verification status:
 
 ```bash
-py -3.12 batch_utils.py update-verify --feature <ID> --status [PASS|WARN|FAIL]
+py -3.12 batch_utils.py update-verify --feature <ID> --status [PASS|WARN|FAIL] --reason "brief description of issues"
 ```
+
+**Reason examples:**
+- WARN: "High confidence (90%) with 70% accuracy"
+- WARN: "Causal ambiguity in description field"
+- FAIL: "Repro mismatch: 2/5 tests failed"
+- FAIL: "Causal violation in executive_summary"
 
 This command:
 - Adds `verify_status` and `verify_date` columns if they don't exist

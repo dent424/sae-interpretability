@@ -38,11 +38,12 @@ The output now includes:
 - **ngram_analysis**: Common bigrams, trigrams, 4-grams (helps identify patterns!)
 
 ### Step 2: Generate Hypotheses
-Based on the n-grams and top activations, generate 2-3 hypotheses. The n-gram analysis often reveals the pattern directly. Consider:
+Based on the n-grams and top activations, generate exactly 3 hypotheses. The n-gram analysis often reveals the pattern directly. Consider:
 - Semantic patterns (meaning, concepts)
 - Syntactic patterns (grammar, structure)
 - Lexical patterns (specific words, n-grams)
 - Positional patterns (sentence position)
+- Structural patterns (formatting, lists, discourse markers)
 
 **CRITICAL - Causal Masking:** GPT-2 uses causal attention. Activations at position N can ONLY depend on tokens 0 to N-1. When a feature fires on token X:
 - It can see everything to the LEFT of X
@@ -89,7 +90,7 @@ py -3.12 run_modal_utf8.py batch_test --feature-idx $ARGUMENTS --output-dir outp
 ### Step 4a: Context Ablation (Recommended)
 For a text where the feature fires, run ablation to find the **causally necessary** context:
 ```bash
-py -3.12 run_modal_utf8.py ablate_context --feature-idx $ARGUMENTS --text "I have never in my life tasted such amazing tacos."
+py -3.12 run_modal_utf8.py ablate_context --feature-idx $ARGUMENTS --output-dir output/interpretations/feature$ARGUMENTS --text "I have never in my life tasted such amazing tacos."
 ```
 
 This progressively removes left context to show exactly which tokens matter:
@@ -130,6 +131,8 @@ State: "H[N] selected as final interpretation with X/Y discriminating test accur
 Write final results to:
 - `output/interpretations/feature$ARGUMENTS/results.json` (structured data)
 - `output/interpretations/feature$ARGUMENTS/report.md` (human-readable report)
+
+**REQUIRED:** Verify results.json includes ALL required fields (feature_idx, status, label, category, description, confidence, corpus_stats, top_tokens, top_activations, ngram_analysis, hypotheses, test_results, key_examples) before proceeding. Do not skip any fields.
 
 **IMPORTANT: The markdown report must document EVERYTHING for full transparency.** Use this structure:
 

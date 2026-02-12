@@ -2208,6 +2208,7 @@ def batch_test(
     feature_idx: int,
     texts: str = "",
     texts_file: str = "",
+    phases: str = "",
     output_dir: str = "output",
     show_visual: bool = True,
     fresh: bool = False
@@ -2234,6 +2235,7 @@ def batch_test(
         feature_idx: Feature to test for activation
         texts: Pipe-separated (|) list of texts to test
         texts_file: Path to JSON file with list of texts
+        phases: Pipe-separated (|) list of phase labels for each text (e.g., "baseline|baseline|discriminating")
         output_dir: Directory for output file
         show_visual: Show visual activation bars in console
         fresh: If True, overwrite existing results. If False (default), append to existing.

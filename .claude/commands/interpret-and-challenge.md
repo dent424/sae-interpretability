@@ -67,11 +67,12 @@ Write to `output/interpretations/feature$ARGUMENTS/results.json`:
 
 ### Step 1.2: Generate Hypotheses
 
-Based on the n-grams and top activations, generate 2-3 hypotheses. Consider:
+Based on the n-grams and top activations, generate exactly 3 hypotheses. Consider:
 - Semantic patterns (meaning, concepts)
 - Syntactic patterns (grammar, structure)
 - Lexical patterns (specific words, n-grams)
 - Positional patterns (sentence position)
+- Structural patterns (formatting, lists, discourse markers)
 
 **CRITICAL - Causal Masking:** GPT-2 uses causal attention. Activations at position N can ONLY depend on tokens 0 to N-1. When a feature fires on token X:
 - It can see everything to the LEFT of X
@@ -164,7 +165,7 @@ py -3.12 run_modal_utf8.py batch_test --feature-idx $ARGUMENTS --output-dir outp
 
 For a text where the feature fires, run ablation to find the **causally necessary** context:
 ```bash
-py -3.12 run_modal_utf8.py ablate_context --feature-idx $ARGUMENTS --text "Example text where feature fires strongly."
+py -3.12 run_modal_utf8.py ablate_context --feature-idx $ARGUMENTS --output-dir output/interpretations/feature$ARGUMENTS --text "Example text where feature fires strongly."
 ```
 
 **After this step, update the JSON:**
@@ -383,6 +384,8 @@ Update `output/interpretations/feature$ARGUMENTS/results.json` with final fields
 }
 ```
 
+**REQUIRED:** Verify results.json includes ALL fields shown in the schema above before proceeding. Do not skip any fields.
+
 ### Step 3.2: Write Markdown Report
 
 Write the final report to `output/interpretations/feature$ARGUMENTS/report.md` with this structure:
@@ -436,9 +439,13 @@ Write the final report to `output/interpretations/feature$ARGUMENTS/report.md` w
 
 **Batch Test Command:** [command with all texts]
 
+**ALL Test Results** (include every baseline, boundary, and discriminating test - do not summarize):
 | Type | # | Text | Activation | Token | H1 | H2 | H3 | Supports |
-|------|---|------|------------|-------|----|----|----|---------||
-[All test results]
+|------|---|------|------------|-------|----|----|----|----------|
+| baseline | 1 | "..." | 0.XXX | ... | fire | fire | fire | all |
+| baseline | 2 | "..." | 0.XXX | ... | fire | fire | fire | all |
+| boundary | 1 | "..." | 0.000 | - | no fire | no fire | no fire | all |
+... (continue for ALL tests)
 
 **Hypothesis Scoring:** | Hypothesis | Supported | Refuted | Accuracy |
 **Winner:** H[N] with X% accuracy
@@ -451,21 +458,32 @@ Write the final report to `output/interpretations/feature$ARGUMENTS/report.md` w
 
 ### Phase 2: Adversarial Challenge
 
-**Counterexample Hunt:**
-| # | Text | Expected | Actual | Result |
+**Counterexample Hunt** (ALL tests):
+| # | Text | Expected | Actual Activation | Token | Result |
+|---|------|----------|-------------------|-------|--------|
+| 1 | "..." | no fire | 0.XXX | ... | ... |
+... (ALL counterexamples)
 **Analysis:** [What revealed]
 
-**Alternative Explanation Tests:**
-| # | Test Type | Text | Activation | Implication |
+**Alternative Explanation Tests** (ALL tests):
+| # | Test Type | Text | Activation | Token | Implication |
+|---|-----------|------|------------|-------|-------------|
+| 1 | ... | "..." | 0.XXX | ... | ... |
+... (ALL alternative tests)
 **Analysis:** [Alternative explanations ruled out?]
 
-**Minimal Pair Grid:**
-| | Var1 | Var2 | Var3 | Var4 |
-| CondA/CondB | ... |
-**Analysis:** [What grid reveals]
+**Minimal Pair Grid** (ALL pairs):
+| # | Condition | Text | Activation | Token |
+|---|-----------|------|------------|-------|
+| 1 | ... | "..." | 0.XXX | ... |
+... (ALL minimal pair tests from grid)
+**Grid Analysis:** [What the full grid reveals]
 
-**Surprising Predictions:**
-| # | Text | Rationale | Activation | Result |
+**Surprising Predictions** (ALL tests):
+| # | Text | Rationale | Activation | Token | Result |
+|---|------|-----------|------------|-------|--------|
+| 1 | "..." | ... | 0.XXX | ... | ... |
+... (ALL surprising prediction tests)
 
 **Challenge Verdict:** [CONFIRMED/REFINED/REFUTED/UNCERTAIN with justification]
 

@@ -2,6 +2,8 @@
 
 Repair salvageable SAE feature interpretations by extracting fields from nested locations and generating synthesis fields.
 
+**Model:** Sub-agents inherit **Opus 4.5** from parent (do NOT specify model parameter).
+
 ## Arguments
 
 $ARGUMENTS - Required: `<feature_id>` or `<id1>, <id2>, ...` or `--salvageable` and optional `--dry-run`
@@ -105,7 +107,6 @@ For each feature, spawn an assessment sub-agent to determine what can be fixed:
 
 **Spawn assessment sub-agent** using Task tool:
 - `subagent_type`: "general-purpose"
-- `model`: "haiku" (fast assessment)
 - `description`: "Assess feature {ID}"
 - `prompt`: Use the Assessment Prompt Template below
 
@@ -196,7 +197,6 @@ For each salvageable feature, spawn a fix sub-agent:
 
 **Spawn fix sub-agent** using Task tool:
 - `subagent_type`: "general-purpose"
-- `model`: "opus" (careful file modifications)
 - `description`: "Fix feature {ID}"
 - `prompt`: Use the Fix Prompt Template below
 

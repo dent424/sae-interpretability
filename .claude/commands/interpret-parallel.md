@@ -2,6 +2,8 @@
 
 Run the full interpret-and-challenge pipeline for features **$ARGUMENTS** using parallel sub-agents.
 
+**Model:** Sub-agents inherit **Opus 4.5** from parent (do NOT specify model parameter).
+
 ## Instructions
 
 1. Parse the feature indices from `$ARGUMENTS` (comma or space separated, e.g., "16751, 11328, 20379")

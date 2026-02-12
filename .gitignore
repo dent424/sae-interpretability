@@ -1,21 +1,16 @@
+# Data files (too large for git)
+Data/
+gpt2_model/
+
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
-
-# Claude Code temp files
-tmpclaude-*
-
-# Data files (too large for git)
-Data/
-feature data/
-
-# Generated output
-output/
-*.log
-modal_output.txt
-wrapper_output.txt
+.Python
+.venv/
+venv/
+ENV/
 
 # IDE
 .vscode/
@@ -24,3 +19,14 @@ wrapper_output.txt
 # OS
 .DS_Store
 Thumbs.db
+
+# Modal
+.modal/
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Jupyter
+.ipynb_checkpoints/

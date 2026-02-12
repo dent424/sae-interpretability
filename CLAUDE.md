@@ -106,6 +106,7 @@ The `feature data/` folder contains pre-generated analysis data for ~940 feature
   - `rank_control` - Ranking with control metric
   - `rank_nocontrol` - Ranking without control metric
   - `interpretation` - Human-provided interpretation (if available)
+  - `category` - Feature classification: Paralinguistic, Semantic, Lexical, or combinations
 
 ### Usage
 The `-existing` slash commands read from this folder:
@@ -113,6 +114,18 @@ The `-existing` slash commands read from this folder:
 /interpret-existing 16751        → reads feature data/feature_16751.json
 /interpret-and-challenge-existing 16751  → reads feature data/feature_16751.json
 ```
+
+## Feature Classification Schema
+
+The `output/Feature_groups.csv` contains hierarchical classifications for 489 interpreted SAE features (JMR manuscript revision).
+
+**Columns:** `feature_index`, `category`, `subcategory`, `thematic_group`, `subgroup`, `semantic_group`, `semantic_subcategory`, `label`, `example`, `executive_summary`
+
+**Hierarchy:** category (3) → subcategory → thematic_group (24) → subgroup (118) → semantic_group (11) → semantic_subcategory
+
+**Key insight:** Lexical mechanism doesn't preclude semantic content (e.g., a "guac" token detector is still Food & Dining).
+
+**Scoring task:** `output/scoring_rubric.md` contains rubrics and instructions for scoring features on `paralinguistic_score` (0-10) and `general_interest_score` (0-10) using parallel Opus agents.
 
 ## Feature Interpretation Workflow
 
@@ -158,6 +171,12 @@ Use slash commands to interpret SAE features with structured hypothesis testing.
 | `/fix_feature <id1>, <id2>, ...` | Fix specific features |
 | `/fix_feature --salvageable` | Fix all features with INCOMPLETE/SCHEMA status |
 | `/fix_feature --dry-run` | Preview what would be fixed without modifying files |
+
+#### Classification Commands
+| Command | Description |
+|---------|-------------|
+| `/classify-batch <id1>, <id2>, ...` | Classify specific features into Paralinguistic/Semantic/Lexical |
+| `/classify-batch --all` | Classify all features with results.json but no category |
 
 ### Output Structure
 

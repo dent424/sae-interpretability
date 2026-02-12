@@ -95,11 +95,12 @@ The file contains:
 ```
 
 ### Step 2: Generate Hypotheses
-Based on the n-grams and top activations, generate 2-3 hypotheses. The n-gram analysis often reveals the pattern directly. Consider:
+Based on the n-grams and top activations, generate exactly 3 hypotheses. The n-gram analysis often reveals the pattern directly. Consider:
 - Semantic patterns (meaning, concepts)
 - Syntactic patterns (grammar, structure)
 - Lexical patterns (specific words, n-grams)
 - Positional patterns (sentence position)
+- Structural patterns (formatting, lists, discourse markers)
 
 **CRITICAL - Causal Masking:** GPT-2 uses causal attention. Activations at position N can ONLY depend on tokens 0 to N-1. When a feature fires on token X:
 - It can see everything to the LEFT of X
@@ -161,7 +162,7 @@ py -3.12 run_modal_utf8.py batch_test --feature-idx $ARGUMENTS --output-dir outp
 ### Step 4a: Context Ablation (Recommended)
 For a text where the feature fires, run ablation to find the **causally necessary** context:
 ```bash
-py -3.12 run_modal_utf8.py ablate_context --feature-idx $ARGUMENTS --text "I have never in my life tasted such amazing tacos."
+py -3.12 run_modal_utf8.py ablate_context --feature-idx $ARGUMENTS --output-dir output/interpretations/feature$ARGUMENTS --text "I have never in my life tasted such amazing tacos."
 ```
 
 This progressively removes left context to show exactly which tokens matter:
@@ -291,6 +292,8 @@ Write final results to (all in `output/interpretations/feature$ARGUMENTS/`):
   "linguistic_function": "..."
 }
 ```
+
+**REQUIRED:** Verify results.json includes ALL fields shown in the schema above before proceeding. Do not skip any fields.
 
 **Audit this step:** Append to `feature$ARGUMENTS/audit.jsonl`:
 ```json

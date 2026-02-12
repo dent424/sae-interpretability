@@ -2,6 +2,8 @@
 
 Process **N** total features from Feature_output.csv, running **batch_size** in parallel at a time.
 
+**Model:** Sub-agents inherit **Opus 4.5** from parent (do NOT specify model parameter).
+
 **Usage:** `/interpret-batch <batch_size> [total] [sort_by]`
 
 **Arguments:**

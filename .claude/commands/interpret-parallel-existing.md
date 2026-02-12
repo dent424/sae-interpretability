@@ -2,6 +2,8 @@
 
 Run the full interpret-and-challenge pipeline for features **$ARGUMENTS** using parallel sub-agents, reading from existing analysis files.
 
+**Model:** Sub-agents inherit **Opus 4.5** from parent (do NOT specify model parameter).
+
 ## Prerequisites
 
 **Ensure `feature data/feature_*.json` files exist for all requested features.** If any are missing, run `analyze_feature_json` for those features first:
