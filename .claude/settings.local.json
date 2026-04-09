@@ -19,6 +19,7 @@
       "Bash(dir:*)",
       "Bash(wc:*)",
       "Bash(py -3.12 batch_utils.py:*)",
+      "Bash(py -3.12 classify_utils.py:*)",
       "Bash(py -3.12 run_ablation.py:*)",
       "Bash(npm install:*)",
       "Bash(pushd:*)",
@@ -43,7 +44,11 @@
       "Bash(echo:*)",
       "Bash(copy \"output\\\\ablation_115_609.json\" \"output\\\\interpretations\\\\feature115\"\")",
       "WebSearch",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(py -3.12 -c:*)",
+      "Bash(grep ^!\\\\|Output written:*)",
+      "Read(//c/Users/alexa/Box/EVERYTHING2/39 - Bottom Up Coding with LLMs/Review Process/Round 1/Llama 3 Robustness/.claude/**)",
+      "Read(//c/Users/alexa/Box/EVERYTHING2/39 - Bottom Up Coding with LLMs/Review Process/**)"
     ]
   }
 }

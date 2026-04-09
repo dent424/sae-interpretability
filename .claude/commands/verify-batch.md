@@ -9,7 +9,7 @@ Verify **N** total feature interpretations from Feature_output.csv, running **ba
 **Arguments:**
 - `batch_size` (required) - How many verifications to run in parallel per batch
 - `total` (optional) - Total features to verify, defaults to batch_size
-- `sort_by` (optional) - Column to sort by: `rank_control` (default) or `rank_nocontrol`
+- `sort_by` (optional) - Column to sort by: `rank_control` (default), `rank_nocontrol`, or any numeric CSV column
 - `--skip-repro` (optional) - Skip reproducibility check for faster verification
 
 **Examples:**
@@ -25,7 +25,7 @@ Verify **N** total feature interpretations from Feature_output.csv, running **ba
 Parse `$ARGUMENTS` to extract:
 - `batch_size` = first number (how many to run in parallel)
 - `total` = second number (total to verify), defaults to batch_size if not specified
-- `sort_by` = third argument if present, must be `rank_control` or `rank_nocontrol`, defaults to `rank_control`
+- `sort_by` = third argument if present (any numeric CSV column, e.g. `rank_control`, `rank_nocontrol`, or a custom column), defaults to `rank_control`
 - `skip_repro` = true if `--skip-repro` flag is present anywhere in arguments
 
 Display: "Will verify {total} features, {batch_size} at a time, sorted by {sort_by}"

@@ -95,6 +95,22 @@ py -3.12 src/scripts/precompute_token_positions.py
 | 20379 | Lexical patterns (gum/gumbo) |
 | 11328 | Formatted lists (bullets, numbered) |
 
+## CRITICAL: Feature_output.csv Protection
+
+**NEVER use Read→Write or Read→Edit on `feature data/Feature_output.csv` directly.** This file has 24,576 rows. The Read tool's 2,000-line default limit will silently truncate it, and writing it back destroys data. This has caused data loss TWICE.
+
+**ALL updates to Feature_output.csv MUST go through `batch_utils.py` CLI commands:**
+- `update-csv` — update interpretation
+- `update-verify` — update verification status
+- `update-audit` / `force-update-audit` — update audit status
+- `update-fix-status` — update fix status
+- `clear-fields` — clear specific fields
+- `batch-summary` — update verify_reason
+
+These commands use `safe_write_csv()` which reads all rows, modifies only the target, and blocks writes that would drop >10% of rows.
+
+**Sub-agents must also follow this rule.** When writing slash command prompts for sub-agents, explicitly state: "Do NOT read or write Feature_output.csv directly. Use batch_utils.py commands."
+
 ## Pre-computed Feature Data
 
 The `feature data/` folder contains pre-generated analysis data for ~940 features:
@@ -117,15 +133,27 @@ The `-existing` slash commands read from this folder:
 
 ## Feature Classification Schema
 
-The `output/Feature_groups.csv` contains hierarchical classifications for 489 interpreted SAE features (JMR manuscript revision).
+Two CSV files contain classification data:
 
-**Columns:** `feature_index`, `category`, `subcategory`, `thematic_group`, `subgroup`, `semantic_group`, `semantic_subcategory`, `label`, `example`, `executive_summary`
+- **`output/Feature_groups.csv`** — Hierarchical classifications for 489 interpreted SAE features (JMR manuscript revision). Contains detailed columns: `feature_index`, `category`, `subcategory`, `thematic_group`, `subgroup`, `semantic_group`, `semantic_subcategory`, `label`, `example`, `executive_summary`
+- **`output/feature_groups.csv`** — Unified classify+score output from `/classify-batch`. Columns: `feature_index`, `rank_control`, `rank_nocontrol`, `interpretation`, `category`, `executive_summary`, `paralinguistic_score`, `general_interest_score`, `paper_category`, `paper_subcategory`. Created by `py -3.12 classify_utils.py init-feature-groups`.
 
-**Hierarchy:** category (3) → subcategory → thematic_group (24) → subgroup (118) → semantic_group (11) → semantic_subcategory
+**Hierarchy (Feature_groups.csv):** category (3) → subcategory → thematic_group (24) → subgroup (118) → semantic_group (11) → semantic_subcategory
+
+**Paper-oriented taxonomy (feature_groups.csv):** `paper_category` (6 broad groups) → `paper_subcategory` (15 fine-grained groups). These are reader-oriented labels for the JMR paper, describing WHAT features capture rather than HOW they work mechanistically. See `Reference Documents/Claude References/CATEGORIZATION_PROCEDURE.md` for full taxonomy and procedure.
+
+| paper_category | paper_subcategories |
+|---|---|
+| Writing Style & Formatting | Paragraph Organization, Punctuation & Typography, Enumeration & Lists |
+| Discourse & Rhetoric | Rhetorical Strategies, Discourse Signaling, Expressive & Vocal Cues |
+| Evaluative & Emotional | Sentiment & Evaluation, Emotional Expression |
+| Domain Content | Food Dining & Service, Temporal & Experiential, Entities & Proper Nouns, Abstract Concepts |
+| Vocabulary & Lexical | Word Detectors |
+| Subword & Syntax | Tokenization Artifacts, Syntactic Constructions |
 
 **Key insight:** Lexical mechanism doesn't preclude semantic content (e.g., a "guac" token detector is still Food & Dining).
 
-**Scoring task:** `output/scoring_rubric.md` contains rubrics and instructions for scoring features on `paralinguistic_score` (0-10) and `general_interest_score` (0-10) using parallel Opus agents.
+**Scoring rubrics:** Rubrics for `paralinguistic_score` (0-10) and `general_interest_score` (0-10) are defined in `/classify-batch` (`classify-batch.md`).
 
 ## Feature Interpretation Workflow
 
@@ -175,8 +203,8 @@ Use slash commands to interpret SAE features with structured hypothesis testing.
 #### Classification Commands
 | Command | Description |
 |---------|-------------|
-| `/classify-batch <id1>, <id2>, ...` | Classify specific features into Paralinguistic/Semantic/Lexical |
-| `/classify-batch --all` | Classify all features with results.json but no category |
+| `/classify-batch <id1>, <id2>, ...` | Classify + score specific features (category + paralinguistic/general_interest scores) |
+| `/classify-batch --all` | Classify + score all features missing category or scores |
 
 ### Output Structure
 
@@ -189,10 +217,10 @@ Each interpretation produces 3 files in `output/interpretations/feature<ID>/`:
 
 To generate analysis data for a feature not in `feature data/`:
 ```bash
-py -3.12 run_modal_utf8.py analyze_feature_json --feature-idx <FEATURE_ID>
+py -3.12 run_modal_utf8.py analyze_feature_json --feature-idx <FEATURE_ID> --output-dir "feature data"
 ```
 
-Output: `output/feature_<ID>.json` (move to `feature data/` for use with `-existing` commands)
+Output: `feature data/feature_<ID>.json` (used directly by `-existing` commands)
 
 ## Reference Documentation
 
@@ -223,11 +251,20 @@ When working on this project, consult these reference files based on your task:
 |------|-------------|
 | `Reference Documents/Code/README.md` | Original notebook documentation, analysis methodology |
 
+### Classification & Taxonomy
+| File | When to Use |
+|------|-------------|
+| `Reference Documents/Claude References/CATEGORIZATION_PROCEDURE.md` | Re-running or extending paper_category classification |
+
 ### Claude-Specific
 | File | When to Use |
 |------|-------------|
 | `Reference Documents/Claude References/CLAUDE_SDK_REFERENCE.md` | Claude API patterns (if integrating LLM analysis) |
 | `Reference Documents/Claude References/CLAUDE_SKILLS_REFERENCE.md` | Claude Code skills and capabilities |
+
+## Backups
+
+- `batch_utils_backup_pre_classify_extract.py` — Full copy of batch_utils.py before extracting classification/scoring functions into classify_utils.py (2026-02-23)
 
 ## Permissions Policy
 

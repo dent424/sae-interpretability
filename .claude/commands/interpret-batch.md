@@ -9,7 +9,7 @@ Process **N** total features from Feature_output.csv, running **batch_size** in 
 **Arguments:**
 - `batch_size` (required) - How many features to run in parallel per batch
 - `total` (optional) - Total features to process, defaults to batch_size
-- `sort_by` (optional) - Column to sort by: `rank_nocontrol` (default) or `rank_control`
+- `sort_by` (optional) - Column to sort by: `rank_nocontrol` (default), `rank_control`, or any numeric CSV column
 
 **Examples:**
 - `/interpret-batch 3 10` - Process 10 features, 3 at a time, sorted by rank_nocontrol
@@ -24,7 +24,7 @@ Process **N** total features from Feature_output.csv, running **batch_size** in 
 Parse `$ARGUMENTS` to extract:
 - `batch_size` = first number (how many to run in parallel)
 - `total` = second number (total to process), defaults to batch_size if not specified
-- `sort_by` = third argument if present, must be `rank_nocontrol` or `rank_control`, defaults to `rank_nocontrol`
+- `sort_by` = third argument if present (any numeric CSV column, e.g. `rank_nocontrol`, `rank_control`, or a custom column), defaults to `rank_nocontrol`
 
 Display: "Will process {total} features, {batch_size} at a time, sorted by {sort_by}"
 
